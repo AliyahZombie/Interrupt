@@ -1,0 +1,5 @@
+{
+  "name": "2D Twin Stick Shooter Prototype",
+  "description": "A 2D mobile-friendly game prototype with a left joystick for movement and tap-to-aim mechanics.",
+  "requestFramePermissions": []
+}
