@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Maximize, Minimize } from 'lucide-react';
-import { GameEngine } from '../game/Engine';
+import { ClientEngine } from '../game/ClientEngine';
 import { CyberButton } from './ui/CyberButton';
 import { CyberPanel } from './ui/CyberPanel';
 import { CyberText } from './ui/CyberText';
 
 export const Game = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const engineRef = useRef<GameEngine | null>(null);
+  const engineRef = useRef<ClientEngine | null>(null);
   const [isPortrait, setIsPortrait] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [forceStart, setForceStart] = useState(false);
@@ -46,7 +46,7 @@ export const Game = () => {
 
   useEffect(() => {
     if ((isPortrait && !forceStart) || !canvasRef.current) return;
-    const engine = new GameEngine(canvasRef.current);
+    const engine = new ClientEngine(canvasRef.current);
     engineRef.current = engine;
     
     engine.onStateChange = (state) => {
@@ -64,9 +64,9 @@ export const Game = () => {
     };
   }, [isPortrait, forceStart]);
 
-  const handleStartGame = () => {
+  const handleJoinRoom = (type: 'city' | 'arena' | 'battlefield') => {
     if (engineRef.current) {
-      engineRef.current.startGame();
+      engineRef.current.joinRoom(type);
     }
   };
 
@@ -99,11 +99,22 @@ export const Game = () => {
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-20">
           <CyberPanel variant="cyan" className="flex flex-col items-center text-center">
             <CyberText variant="h1" color="cyan" glow className="mb-2">SURVIVOR</CyberText>
-            <CyberText variant="label" color="neutral" className="mb-8">SYSTEM INITIALIZATION READY</CyberText>
-            <CyberButton variant="primary" onClick={handleStartGame}>
-              START GAME
-            </CyberButton>
+            <CyberText variant="label" color="neutral" className="mb-8">CONNECTING TO SERVER...</CyberText>
           </CyberPanel>
+        </div>
+      )}
+
+      {gameState === 'PLAYING' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-4 z-20">
+          <CyberButton variant="ghost" onClick={() => handleJoinRoom('city')}>
+            MAIN CITY
+          </CyberButton>
+          <CyberButton variant="ghost" onClick={() => handleJoinRoom('arena')}>
+            ARENA (PvP)
+          </CyberButton>
+          <CyberButton variant="ghost" onClick={() => handleJoinRoom('battlefield')}>
+            BATTLEFIELD (PvE)
+          </CyberButton>
         </div>
       )}
 
@@ -113,8 +124,8 @@ export const Game = () => {
             <CyberText variant="h1" color="red" glow className="mb-2">SYSTEM FAILURE</CyberText>
             <CyberText variant="h3" color="white" className="mb-2">FINAL SCORE: {score}</CyberText>
             <CyberText variant="label" color="cyan" className="mb-8">CREDITS COLLECTED: {credits}</CyberText>
-            <CyberButton variant="primary" onClick={handleStartGame}>
-              REBOOT SYSTEM
+            <CyberButton variant="primary" onClick={() => handleJoinRoom('city')}>
+              RESPAWN IN CITY
             </CyberButton>
           </CyberPanel>
         </div>
