@@ -59,32 +59,66 @@ export class Renderer {
     this.drawPlayer(player, cameraX, cameraY, true);
 
     // Regular Aiming Indicator
-    if (engine.rightJoystick.active) {
+    let activeAimX = 0;
+    let activeAimY = 0;
+    let isAiming = false;
+    let aimColor = '#eab308'; // Default yellow for fire
+
+    // Check skill joysticks first
+    for (const sj of engine.skillJoysticks) {
+      if (sj.active) {
+        const dx = sj.x - sj.originX;
+        const dy = sj.y - sj.originY;
+        if (Math.hypot(dx, dy) > 10) {
+          activeAimX = dx;
+          activeAimY = dy;
+          isAiming = true;
+          aimColor = '#06b6d4'; // Cyan for skills
+          break;
+        }
+      }
+    }
+
+    // Fallback to right joystick
+    if (!isAiming && engine.rightJoystick.active) {
       const dx = engine.rightJoystick.x - engine.rightJoystick.originX;
       const dy = engine.rightJoystick.y - engine.rightJoystick.originY;
       if (Math.hypot(dx, dy) > 10) {
-        const angle = Math.atan2(dy, dx);
-        const offset = player.radius + 15;
-        ctx.save();
-        ctx.translate(screenPx, screenPy);
-        ctx.rotate(angle);
-        ctx.beginPath();
-        ctx.moveTo(offset + 15, 0);
-        ctx.lineTo(offset, -10);
-        ctx.lineTo(offset, 10);
-        ctx.fillStyle = '#eab308';
-        ctx.fill();
-        ctx.closePath();
-        
-        ctx.beginPath();
-        ctx.moveTo(offset + 15, 0);
-        ctx.lineTo(800, 0);
-        ctx.strokeStyle = 'rgba(234, 179, 8, 0.1)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        ctx.restore();
+        activeAimX = dx;
+        activeAimY = dy;
+        isAiming = true;
       }
+    }
+
+    if (isAiming) {
+      const angle = Math.atan2(activeAimY, activeAimX);
+      const offset = player.radius + 15;
+      ctx.save();
+      ctx.translate(screenPx, screenPy);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(offset + 15, 0);
+      ctx.lineTo(offset, -10);
+      ctx.lineTo(offset, 10);
+      ctx.fillStyle = aimColor;
+      ctx.fill();
+      ctx.closePath();
+      
+      ctx.beginPath();
+      ctx.moveTo(offset + 15, 0);
+      ctx.lineTo(800, 0);
+      
+      // Convert hex to rgba for stroke
+      let strokeColor = 'rgba(234, 179, 8, 0.1)';
+      if (aimColor === '#06b6d4') {
+        strokeColor = 'rgba(6, 182, 212, 0.1)';
+      }
+      
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      ctx.restore();
     }
 
     this.drawUI(engine, player);
@@ -359,25 +393,56 @@ export class Renderer {
     ctx.fillText(`PLAYERS: ${Object.keys(engine.state?.players || {}).length}`, canvas.width - 20, 70);
 
     // Joysticks
-    const drawJoystick = (joy: any, color: string) => {
-      if (!joy.active) return;
+    const drawJoystick = (joy: any, color: string, label?: string, cooldownProgress?: number) => {
+      if (!joy.active && !joy.isFixed) return;
+      
+      const alpha = joy.active ? 0.3 : 0.1;
+      const strokeAlpha = joy.active ? 0.5 : 0.2;
+      
       ctx.beginPath();
       ctx.arc(joy.originX, joy.originY, joy.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${color}, 0.1)`;
+      ctx.fillStyle = `rgba(${color}, ${alpha})`;
       ctx.fill();
-      ctx.strokeStyle = `rgba(${color}, 0.3)`;
+      ctx.strokeStyle = `rgba(${color}, ${strokeAlpha})`;
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.closePath();
 
+      if (cooldownProgress !== undefined && cooldownProgress < 1) {
+        ctx.beginPath();
+        ctx.moveTo(joy.originX, joy.originY);
+        ctx.arc(joy.originX, joy.originY, joy.radius, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * cooldownProgress);
+        ctx.fillStyle = `rgba(0, 0, 0, 0.5)`;
+        ctx.fill();
+        ctx.closePath();
+      }
+
       ctx.beginPath();
       ctx.arc(joy.x, joy.y, joy.knobRadius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${color}, 0.5)`;
+      ctx.fillStyle = `rgba(${color}, ${joy.active ? 0.8 : 0.4})`;
       ctx.fill();
       ctx.closePath();
+
+      if (label) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '10px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, joy.originX, joy.originY);
+      }
     };
 
     drawJoystick(engine.leftJoystick, '255, 255, 255');
-    drawJoystick(engine.rightJoystick, '234, 179, 8');
+    drawJoystick(engine.rightJoystick, '234, 179, 8', 'FIRE');
+    
+    for (const sj of engine.skillJoysticks) {
+      const skill = player.skills[sj.skillIndex];
+      if (skill) {
+        const now = Date.now();
+        const timeSinceUsed = now - skill.lastUsed;
+        const progress = Math.min(1, timeSinceUsed / skill.cooldown);
+        drawJoystick(sj, '6, 182, 212', skill.name.slice(0, 4).toUpperCase(), progress);
+      }
+    }
   }
 }

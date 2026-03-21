@@ -111,6 +111,27 @@ export const Game = () => {
       >
         {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
       </button>
+
+      {gameState === 'GAME_OVER' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-40">
+          <CyberPanel variant="danger" className="flex flex-col items-center text-center max-w-md w-full">
+            <CyberText variant="h1" color="danger" glow className="mb-2">SYSTEM FAILURE</CyberText>
+            <CyberText variant="body" color="neutral" className="mb-8">
+              Your integrity has reached 0%. Returning to City...
+            </CyberText>
+            
+            <div className="flex gap-4 w-full">
+              <CyberButton 
+                variant="danger" 
+                className="w-full"
+                onClick={() => handleJoinRoom('city')}
+              >
+                RESPAWN
+              </CyberButton>
+            </div>
+          </CyberPanel>
+        </div>
+      )}
     </div>
   );
 };

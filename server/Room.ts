@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { PlayerState, EnemyState, ProjectileState, ParticleState, CreditState, TileState, RoomState, ClientInput, PortalState } from '../src/shared/types';
 import { MapConfig, maps } from './Map';
+import { Player, BaseEnemy, MeleeEnemy, RangedEnemy } from './Entities';
 
 export class Room {
   id: string;
@@ -10,8 +11,8 @@ export class Room {
   maxPlayers: number;
   onPlayerPortal: (socketId: string, targetType: 'city' | 'arena' | 'battlefield') => void;
 
-  players: Map<string, PlayerState> = new Map();
-  enemies: Map<string, EnemyState> = new Map();
+  players: Map<string, Player> = new Map();
+  enemies: Map<string, BaseEnemy> = new Map();
   projectiles: Map<string, ProjectileState> = new Map();
   particles: Map<string, ParticleState> = new Map();
   credits: Map<string, CreditState> = new Map();
@@ -45,23 +46,11 @@ export class Room {
   }
 
   addPlayer(socket: Socket, score: number = 0, credits: number = 0) {
-    const player: PlayerState = {
-      id: socket.id,
-      x: this.map.width / 2,
-      y: this.map.height / 2,
-      vx: 0,
-      vy: 0,
-      radius: 20,
-      hp: 100,
-      maxHp: 100,
-      color: '#3b82f6',
-      score,
-      credits
-    };
+    const player = new Player(socket.id, this.map.width / 2, this.map.height / 2, score, credits);
     this.players.set(socket.id, player);
     
     // Broadcast to others
-    socket.to(this.id).emit('playerJoined', player);
+    socket.to(this.id).emit('playerJoined', player.getState());
   }
 
   removePlayer(playerId: string) {
@@ -89,6 +78,14 @@ export class Room {
         player.x += player.vx * dt;
         player.y += player.vy * dt;
 
+        if (input.x !== undefined && input.y !== undefined) {
+          // Trust client position if it's reasonably close to server simulation
+          if (Math.hypot(player.x - input.x, player.y - input.y) < 200) {
+            player.x = input.x;
+            player.y = input.y;
+          }
+        }
+
         // Constrain to map
         player.x = Math.max(player.radius, Math.min(this.map.width - player.radius, player.x));
         player.y = Math.max(player.radius, Math.min(this.map.height - player.radius, player.y));
@@ -105,6 +102,18 @@ export class Room {
           }
         }
         if (changedRoom) continue;
+
+        // Skills logic
+        if (input.skills && input.skills.length > 0) {
+          for (const skillInput of input.skills) {
+            const skill = player.skills[skillInput.index];
+            if (skill) {
+              skill.activate(player, this, skillInput.aimX, skillInput.aimY);
+            }
+          }
+          // Clear skills after processing to prevent multiple activations from same input
+          input.skills = [];
+        }
 
         // Shooting logic (basic)
         if (input.shooting && this.type !== 'city') {
@@ -123,6 +132,15 @@ export class Room {
             });
           }
         }
+
+        // Credit pickup
+        for (const [creditId, credit] of this.credits.entries()) {
+          const dist = Math.hypot(player.x - credit.x, player.y - credit.y);
+          if (dist < player.radius + 15) { // 15 is approx credit radius
+            player.credits += credit.value;
+            this.credits.delete(creditId);
+          }
+        }
       }
     }
 
@@ -139,19 +157,50 @@ export class Room {
 
       // Check collision with enemies (Battlefield)
       if (this.type === 'battlefield') {
-        for (const [enemyId, enemy] of this.enemies.entries()) {
-          const dist = Math.hypot(proj.x - enemy.x, proj.y - enemy.y);
-          if (dist < proj.radius + enemy.radius) {
-            enemy.hp -= 10;
-            this.projectiles.delete(id);
-            if (enemy.hp <= 0) {
-              this.enemies.delete(enemyId);
-              const owner = this.players.get(proj.ownerId);
-              if (owner) {
-                owner.score += 100;
+        // Enemy projectiles hitting players
+        if (proj.ownerId.startsWith('enemy-')) {
+          for (const [playerId, player] of this.players.entries()) {
+            const dist = Math.hypot(proj.x - player.x, proj.y - player.y);
+            if (dist < proj.radius + player.radius) {
+              player.hp -= 15;
+              this.projectiles.delete(id);
+              if (player.hp <= 0) {
+                player.hp = player.maxHp;
+                player.x = Math.random() * this.map.width;
+                player.y = Math.random() * this.map.height;
+                player.score = Math.floor(player.score / 2);
+                this.io.to(playerId).emit('playerDied');
               }
+              break;
             }
-            break;
+          }
+        } else {
+          // Player projectiles hitting enemies
+          for (const [enemyId, enemy] of this.enemies.entries()) {
+            const dist = Math.hypot(proj.x - enemy.x, proj.y - enemy.y);
+            if (dist < proj.radius + enemy.radius) {
+              enemy.hp -= 10;
+              this.projectiles.delete(id);
+              if (enemy.hp <= 0) {
+                this.enemies.delete(enemyId);
+                const owner = this.players.get(proj.ownerId);
+                if (owner) {
+                  owner.score += 100;
+                }
+                // Drop credits
+                const numCredits = Math.floor(Math.random() * 3) + 1; // 1 to 3 credits
+                for (let i = 0; i < numCredits; i++) {
+                  const creditId = `credit-${Date.now()}-${i}`;
+                  this.credits.set(creditId, {
+                    id: creditId,
+                    x: enemy.x + (Math.random() - 0.5) * 20,
+                    y: enemy.y + (Math.random() - 0.5) * 20,
+                    value: 10
+                  });
+                }
+              }
+              break;
+            }
           }
         }
       }
@@ -172,6 +221,7 @@ export class Room {
               if (owner) {
                 owner.score += 500; // Kill score
               }
+              this.io.to(playerId).emit('playerDied');
             }
             break;
           }
@@ -184,48 +234,19 @@ export class Room {
       // Spawn enemies
       if (this.enemies.size < 10 && Math.random() < 0.05) {
         const enemyId = `enemy-${Date.now()}`;
-        this.enemies.set(enemyId, {
-          id: enemyId,
-          type: 'melee',
-          x: Math.random() * this.map.width,
-          y: Math.random() * this.map.height,
-          radius: 15,
-          hp: 50,
-          maxHp: 50,
-          color: '#ef4444'
-        });
+        const isRanged = Math.random() < 0.3; // 30% chance for ranged enemy
+        const ex = Math.random() * this.map.width;
+        const ey = Math.random() * this.map.height;
+        if (isRanged) {
+          this.enemies.set(enemyId, new RangedEnemy(enemyId, ex, ey));
+        } else {
+          this.enemies.set(enemyId, new MeleeEnemy(enemyId, ex, ey));
+        }
       }
 
-      // Move enemies towards nearest player
-      for (const [id, enemy] of this.enemies.entries()) {
-        let nearestPlayer: PlayerState | null = null;
-        let minDist = Infinity;
-        for (const player of this.players.values()) {
-          const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-          if (dist < minDist) {
-            minDist = dist;
-            nearestPlayer = player;
-          }
-        }
-
-        if (nearestPlayer) {
-          const angle = Math.atan2(nearestPlayer.y - enemy.y, nearestPlayer.x - enemy.x);
-          const speed = 100;
-          enemy.x += Math.cos(angle) * speed * dt;
-          enemy.y += Math.sin(angle) * speed * dt;
-
-          // Damage player if close enough
-          if (minDist < enemy.radius + nearestPlayer.radius) {
-            nearestPlayer.hp -= 20 * dt; // 20 damage per second
-            if (nearestPlayer.hp <= 0) {
-              nearestPlayer.hp = nearestPlayer.maxHp;
-              nearestPlayer.x = Math.random() * this.map.width;
-              nearestPlayer.y = Math.random() * this.map.height;
-              // Player died, maybe reset score?
-              nearestPlayer.score = Math.floor(nearestPlayer.score / 2);
-            }
-          }
-        }
+      // Update enemies
+      for (const enemy of this.enemies.values()) {
+        enemy.update(dt, this);
       }
     }
 
@@ -234,13 +255,23 @@ export class Room {
   }
 
   getState(): RoomState {
+    const playersState: Record<string, PlayerState> = {};
+    for (const [id, player] of this.players.entries()) {
+      playersState[id] = player.getState();
+    }
+
+    const enemiesState: Record<string, EnemyState> = {};
+    for (const [id, enemy] of this.enemies.entries()) {
+      enemiesState[id] = enemy.getState();
+    }
+
     return {
       id: this.id,
       type: this.type,
       width: this.map.width,
       height: this.map.height,
-      players: Object.fromEntries(this.players),
-      enemies: Object.fromEntries(this.enemies),
+      players: playersState,
+      enemies: enemiesState,
       projectiles: Object.fromEntries(this.projectiles),
       particles: Object.fromEntries(this.particles),
       credits: Object.fromEntries(this.credits),

@@ -3,6 +3,12 @@ export interface Vector2 {
   y: number;
 }
 
+export interface SkillState {
+  name: string;
+  cooldown: number;
+  lastUsed: number;
+}
+
 export interface PlayerState {
   id: string;
   x: number;
@@ -15,6 +21,7 @@ export interface PlayerState {
   color: string;
   score: number;
   credits: number;
+  skills: SkillState[];
 }
 
 export interface EnemyState {
@@ -22,10 +29,13 @@ export interface EnemyState {
   type: 'melee' | 'ranged';
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   radius: number;
   hp: number;
   maxHp: number;
   color: string;
+  lastShootTime?: number;
 }
 
 export interface ProjectileState {
@@ -99,4 +109,6 @@ export interface ClientInput {
     aimX: number;
     aimY: number;
   }[];
+  x?: number; // Client-side prediction
+  y?: number; // Client-side prediction
 }
