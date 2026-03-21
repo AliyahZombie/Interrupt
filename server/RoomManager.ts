@@ -6,6 +6,8 @@ export class RoomManager {
   rooms: Map<string, Room> = new Map();
   playerRoom: Map<string, string> = new Map();
 
+  playerData: Map<string, { score: number, credits: number }> = new Map();
+
   constructor(public io: Server) {
     // Create initial rooms
     this.createRoom('city', 'main-city-1');
@@ -14,7 +16,12 @@ export class RoomManager {
   }
 
   createRoom(type: 'city' | 'arena' | 'battlefield', id: string) {
-    const room = new Room(id, type, this.io);
+    const room = new Room(id, type, this.io, (socketId, targetType) => {
+      const socket = this.io.sockets.sockets.get(socketId);
+      if (socket) {
+        this.joinRoomByType(socket, targetType);
+      }
+    });
     this.rooms.set(id, room);
     return room;
   }
@@ -49,7 +56,8 @@ export class RoomManager {
     
     const room = this.rooms.get(roomId);
     if (room) {
-      room.addPlayer(socket);
+      const data = this.playerData.get(socket.id) || { score: 0, credits: 0 };
+      room.addPlayer(socket, data.score, data.credits);
       this.playerRoom.set(socket.id, room.id);
       socket.join(room.id);
       socket.emit('roomJoined', room.getState());
@@ -61,6 +69,10 @@ export class RoomManager {
     if (roomId) {
       const room = this.rooms.get(roomId);
       if (room) {
+        const player = room.players.get(socket.id);
+        if (player) {
+          this.playerData.set(socket.id, { score: player.score, credits: player.credits });
+        }
         room.removePlayer(socket.id);
         socket.leave(room.id);
       }

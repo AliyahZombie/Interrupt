@@ -42,6 +42,7 @@ export class Renderer {
     // Tiles are hidden as requested
     // Object.values(state.tiles).forEach(t => this.drawTile(t, cameraX, cameraY));
     
+    Object.values(state.portals || {}).forEach(p => this.drawPortal(p, cameraX, cameraY, performance.now() / 1000));
     Object.values(state.credits).forEach(c => this.drawCredit(c, cameraX, cameraY, performance.now() / 1000));
     Object.values(state.particles).forEach(p => this.drawParticle(p, cameraX, cameraY));
     Object.values(state.enemies).forEach(e => this.drawEnemy(e, cameraX, cameraY));
@@ -136,7 +137,17 @@ export class Renderer {
     ctx.fillStyle = '#ffffff';
     ctx.font = '10px "JetBrains Mono"';
     ctx.textAlign = 'center';
-    ctx.fillText(isLocal ? 'YOU' : p.id.slice(0, 4), 0, -p.radius - 10);
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(isLocal ? 'YOU' : p.id.slice(0, 4), 0, -p.radius - 15);
+
+    // Draw HP Bar
+    const hpPercent = Math.max(0, p.hp / p.maxHp);
+    const barWidth = 30;
+    const barHeight = 4;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(-barWidth / 2, -p.radius - 10, barWidth, barHeight);
+    ctx.fillStyle = hpPercent > 0.3 ? '#22c55e' : '#ef4444';
+    ctx.fillRect(-barWidth / 2, -p.radius - 10, barWidth * hpPercent, barHeight);
 
     ctx.restore();
   }
@@ -160,6 +171,15 @@ export class Renderer {
     ctx.lineWidth = 2;
     ctx.stroke();
     
+    // Draw HP Bar
+    const hpPercent = Math.max(0, e.hp / e.maxHp);
+    const barWidth = 30;
+    const barHeight = 4;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(-barWidth / 2, -e.radius - 10, barWidth, barHeight);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(-barWidth / 2, -e.radius - 10, barWidth * hpPercent, barHeight);
+
     ctx.restore();
   }
 
@@ -187,6 +207,45 @@ export class Renderer {
     ctx.fillStyle = p.color;
     ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  private drawPortal(p: any, cameraX: number, cameraY: number, time: number) {
+    const { ctx } = this;
+    const x = p.x - cameraX;
+    const y = p.y - cameraY;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Draw outer ring
+    ctx.beginPath();
+    ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 4;
+    ctx.setLineDash([10, 10]);
+    ctx.lineDashOffset = -time * 20;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 15;
+    ctx.stroke();
+
+    // Draw inner glow
+    ctx.beginPath();
+    ctx.arc(0, 0, p.radius * 0.8, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = 0.2 + Math.sin(time * 3) * 0.1;
+    ctx.fill();
+
+    // Draw label
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 14px "JetBrains Mono"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.label, 0, 0);
+
+    ctx.restore();
   }
 
   private drawCredit(c: CreditState, cameraX: number, cameraY: number, time: number) {

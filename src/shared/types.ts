@@ -64,6 +64,16 @@ export interface TileState {
   color: string;
 }
 
+export interface PortalState {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  targetRoomType: 'city' | 'arena' | 'battlefield';
+  color: string;
+  label: string;
+}
+
 export interface RoomState {
   id: string;
   type: 'city' | 'arena' | 'battlefield';
@@ -75,6 +85,7 @@ export interface RoomState {
   particles: Record<string, ParticleState>;
   credits: Record<string, CreditState>;
   tiles: Record<string, TileState>;
+  portals: Record<string, PortalState>;
 }
 
 export interface ClientInput {

@@ -104,33 +104,6 @@ export const Game = () => {
         </div>
       )}
 
-      {gameState === 'PLAYING' && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-4 z-20">
-          <CyberButton variant="ghost" onClick={() => handleJoinRoom('city')}>
-            MAIN CITY
-          </CyberButton>
-          <CyberButton variant="ghost" onClick={() => handleJoinRoom('arena')}>
-            ARENA (PvP)
-          </CyberButton>
-          <CyberButton variant="ghost" onClick={() => handleJoinRoom('battlefield')}>
-            BATTLEFIELD (PvE)
-          </CyberButton>
-        </div>
-      )}
-
-      {gameState === 'GAME_OVER' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-20">
-          <CyberPanel variant="red" className="flex flex-col items-center text-center">
-            <CyberText variant="h1" color="red" glow className="mb-2">SYSTEM FAILURE</CyberText>
-            <CyberText variant="h3" color="white" className="mb-2">FINAL SCORE: {score}</CyberText>
-            <CyberText variant="label" color="cyan" className="mb-8">CREDITS COLLECTED: {credits}</CyberText>
-            <CyberButton variant="primary" onClick={() => handleJoinRoom('city')}>
-              RESPAWN IN CITY
-            </CyberButton>
-          </CyberPanel>
-        </div>
-      )}
-
       <button
         onClick={toggleFullscreen}
         className="absolute top-4 right-4 z-30 p-2 bg-black/50 rounded-full text-white hover:bg-black/70 transition-colors border border-white/10"

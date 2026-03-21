@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { PlayerState, EnemyState, ProjectileState, ParticleState, CreditState, TileState, RoomState, ClientInput } from '../src/shared/types';
+import { PlayerState, EnemyState, ProjectileState, ParticleState, CreditState, TileState, RoomState, ClientInput, PortalState } from '../src/shared/types';
 import { MapConfig, maps } from './Map';
 
 export class Room {
@@ -8,6 +8,7 @@ export class Room {
   io: Server;
   map: MapConfig;
   maxPlayers: number;
+  onPlayerPortal: (socketId: string, targetType: 'city' | 'arena' | 'battlefield') => void;
 
   players: Map<string, PlayerState> = new Map();
   enemies: Map<string, EnemyState> = new Map();
@@ -15,16 +16,18 @@ export class Room {
   particles: Map<string, ParticleState> = new Map();
   credits: Map<string, CreditState> = new Map();
   tiles: Map<string, TileState> = new Map();
+  portals: Map<string, PortalState> = new Map();
 
   inputs: Map<string, ClientInput> = new Map();
 
   lastTime: number = Date.now();
   time: number = 0;
 
-  constructor(id: string, type: 'city' | 'arena' | 'battlefield', io: Server) {
+  constructor(id: string, type: 'city' | 'arena' | 'battlefield', io: Server, onPlayerPortal: (socketId: string, targetType: 'city' | 'arena' | 'battlefield') => void) {
     this.id = id;
     this.type = type;
     this.io = io;
+    this.onPlayerPortal = onPlayerPortal;
     this.map = maps[type];
     this.maxPlayers = this.map.maxPlayers;
 
@@ -32,9 +35,16 @@ export class Room {
     this.map.tiles.forEach((t, i) => {
       this.tiles.set(`tile-${i}`, { ...t, id: `tile-${i}` });
     });
+
+    // Initialize portals from map
+    if (this.map.portals) {
+      this.map.portals.forEach((p, i) => {
+        this.portals.set(`portal-${i}`, { ...p, id: `portal-${i}` });
+      });
+    }
   }
 
-  addPlayer(socket: Socket) {
+  addPlayer(socket: Socket, score: number = 0, credits: number = 0) {
     const player: PlayerState = {
       id: socket.id,
       x: this.map.width / 2,
@@ -45,8 +55,8 @@ export class Room {
       hp: 100,
       maxHp: 100,
       color: '#3b82f6',
-      score: 0,
-      credits: 0
+      score,
+      credits
     };
     this.players.set(socket.id, player);
     
@@ -82,6 +92,19 @@ export class Room {
         // Constrain to map
         player.x = Math.max(player.radius, Math.min(this.map.width - player.radius, player.x));
         player.y = Math.max(player.radius, Math.min(this.map.height - player.radius, player.y));
+
+        // Check portal collision
+        let changedRoom = false;
+        for (const portal of this.portals.values()) {
+          const dist = Math.hypot(player.x - portal.x, player.y - portal.y);
+          if (dist < player.radius + portal.radius) {
+            // Trigger portal
+            this.onPlayerPortal(id, portal.targetRoomType);
+            changedRoom = true;
+            break; // Only trigger one portal
+          }
+        }
+        if (changedRoom) continue;
 
         // Shooting logic (basic)
         if (input.shooting && this.type !== 'city') {
@@ -221,7 +244,8 @@ export class Room {
       projectiles: Object.fromEntries(this.projectiles),
       particles: Object.fromEntries(this.particles),
       credits: Object.fromEntries(this.credits),
-      tiles: Object.fromEntries(this.tiles)
+      tiles: Object.fromEntries(this.tiles),
+      portals: Object.fromEntries(this.portals)
     };
   }
 }
