@@ -1,131 +1,116 @@
-import { ClientEngine } from './ClientEngine';
-import { RoomState, PlayerState, EnemyState, ProjectileState, ParticleState, CreditState, TileState } from '../shared/types';
+import { GameEngine, JoystickData } from './Engine';
+import { MeleeEnemy } from './Entities';
 
 export class Renderer {
   constructor(public canvas: HTMLCanvasElement, public ctx: CanvasRenderingContext2D) {}
 
-  draw(engine: ClientEngine) {
+  draw(engine: GameEngine) {
     const { canvas, ctx } = this;
 
     // Always draw background
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    if (!engine.state || !engine.playerId) {
+    if (!engine.gameStarted) {
       // Draw some cool background for the menu
-      this.drawGrid(0, 0, canvas.width, canvas.height);
+      this.drawGrid(engine, 0, 0);
       return;
     }
 
-    const state = engine.state;
-    const player = state.players[engine.playerId];
-    if (!player) return;
+    let cameraX = engine.player.x - canvas.width / 2;
+    let cameraY = engine.player.y - canvas.height / 2;
+    cameraX = Math.max(0, Math.min(engine.world.width - canvas.width, cameraX));
+    cameraY = Math.max(0, Math.min(engine.world.height - canvas.height, cameraY));
 
-    let cameraX = player.x - canvas.width / 2;
-    let cameraY = player.y - canvas.height / 2;
-    cameraX = Math.max(0, Math.min(state.width - canvas.width, cameraX));
-    cameraY = Math.max(0, Math.min(state.height - canvas.height, cameraY));
+    const screenPx = engine.player.x - cameraX;
+    const screenPy = engine.player.y - cameraY;
 
-    const screenPx = player.x - cameraX;
-    const screenPy = player.y - cameraY;
-
-    this.drawGrid(cameraX, cameraY, canvas.width, canvas.height);
+    this.drawGrid(engine, cameraX, cameraY);
 
     // Bounds
     ctx.save();
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
     ctx.lineWidth = 4;
-    ctx.strokeRect(-cameraX, -cameraY, state.width, state.height);
+    ctx.strokeRect(-cameraX, -cameraY, engine.world.width, engine.world.height);
     ctx.restore();
 
     // Entities
-    // Tiles are hidden as requested
-    // Object.values(state.tiles).forEach(t => this.drawTile(t, cameraX, cameraY));
-    
-    Object.values(state.portals || {}).forEach(p => this.drawPortal(p, cameraX, cameraY, performance.now() / 1000));
-    Object.values(state.credits).forEach(c => this.drawCredit(c, cameraX, cameraY, performance.now() / 1000));
-    Object.values(state.particles).forEach(p => this.drawParticle(p, cameraX, cameraY));
-    Object.values(state.enemies).forEach(e => this.drawEnemy(e, cameraX, cameraY));
-    Object.values(state.projectiles).forEach(p => this.drawProjectile(p, cameraX, cameraY));
+    engine.tiles.forEach(t => t.draw(ctx, cameraX, cameraY));
+    engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, performance.now() / 1000));
+    engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
+    engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY));
+    engine.projectiles.forEach(p => p.draw(ctx, cameraX, cameraY));
 
-    // Draw other players
-    Object.values(state.players).forEach(p => {
-      if (p.id !== engine.playerId) {
-        this.drawPlayer(p, cameraX, cameraY, false);
+    if (!engine.gameOver) {
+      engine.player.draw(ctx, screenPx, screenPy);
+
+      // Skill Aiming Indicator
+      if (engine.activeSkillIndex !== null && engine.skillJoystick.active) {
+        const skill = engine.skills[engine.activeSkillIndex];
+        if (skill && skill.isDirectional) {
+          const dx = engine.skillJoystick.x - engine.skillJoystick.originX;
+          const dy = engine.skillJoystick.y - engine.skillJoystick.originY;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 10) {
+            const angle = Math.atan2(dy, dx);
+            ctx.save();
+            ctx.translate(screenPx, screenPy);
+            ctx.rotate(angle);
+            
+            ctx.beginPath();
+            ctx.moveTo(20, -10);
+            ctx.lineTo(150, -30);
+            ctx.lineTo(150, 30);
+            ctx.lineTo(20, 10);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.moveTo(20, 0);
+            ctx.lineTo(150, 0);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            
+            ctx.restore();
+          }
+        }
       }
-    });
-
-    // Draw local player
-    this.drawPlayer(player, cameraX, cameraY, true);
-
-    // Regular Aiming Indicator
-    let activeAimX = 0;
-    let activeAimY = 0;
-    let isAiming = false;
-    let aimColor = '#eab308'; // Default yellow for fire
-
-    // Check skill joysticks first
-    for (const sj of engine.skillJoysticks) {
-      if (sj.active) {
-        const dx = sj.x - sj.originX;
-        const dy = sj.y - sj.originY;
+      // Regular Aiming Indicator
+      else if (engine.rightJoystick.active) {
+        const dx = engine.rightJoystick.x - engine.rightJoystick.originX;
+        const dy = engine.rightJoystick.y - engine.rightJoystick.originY;
         if (Math.hypot(dx, dy) > 10) {
-          activeAimX = dx;
-          activeAimY = dy;
-          isAiming = true;
-          aimColor = '#06b6d4'; // Cyan for skills
-          break;
+          const angle = Math.atan2(dy, dx);
+          const offset = engine.player.radius + 15;
+          ctx.save();
+          ctx.translate(screenPx, screenPy);
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.moveTo(offset + 15, 0);
+          ctx.lineTo(offset, -10);
+          ctx.lineTo(offset, 10);
+          ctx.fillStyle = '#eab308';
+          ctx.fill();
+          ctx.closePath();
+          
+          ctx.beginPath();
+          ctx.moveTo(offset + 15, 0);
+          ctx.lineTo(800, 0);
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.1)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          
+          ctx.restore();
         }
       }
     }
 
-    // Fallback to right joystick
-    if (!isAiming && engine.rightJoystick.active) {
-      const dx = engine.rightJoystick.x - engine.rightJoystick.originX;
-      const dy = engine.rightJoystick.y - engine.rightJoystick.originY;
-      if (Math.hypot(dx, dy) > 10) {
-        activeAimX = dx;
-        activeAimY = dy;
-        isAiming = true;
-      }
-    }
-
-    if (isAiming) {
-      const angle = Math.atan2(activeAimY, activeAimX);
-      const offset = player.radius + 15;
-      ctx.save();
-      ctx.translate(screenPx, screenPy);
-      ctx.rotate(angle);
-      ctx.beginPath();
-      ctx.moveTo(offset + 15, 0);
-      ctx.lineTo(offset, -10);
-      ctx.lineTo(offset, 10);
-      ctx.fillStyle = aimColor;
-      ctx.fill();
-      ctx.closePath();
-      
-      ctx.beginPath();
-      ctx.moveTo(offset + 15, 0);
-      ctx.lineTo(800, 0);
-      
-      // Convert hex to rgba for stroke
-      let strokeColor = 'rgba(234, 179, 8, 0.1)';
-      if (aimColor === '#06b6d4') {
-        strokeColor = 'rgba(6, 182, 212, 0.1)';
-      }
-      
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      
-      ctx.restore();
-    }
-
-    this.drawUI(engine, player);
+    this.drawUI(engine);
   }
 
-  private drawGrid(cameraX: number, cameraY: number, width: number, height: number) {
-    const { ctx } = this;
+  private drawGrid(engine: GameEngine, cameraX: number, cameraY: number) {
+    const { canvas, ctx } = this;
     ctx.save();
     ctx.strokeStyle = 'rgba(6, 182, 212, 0.2)';
     ctx.shadowColor = 'rgba(6, 182, 212, 0.8)';
@@ -136,191 +121,26 @@ export class Renderer {
     const offsetY = -cameraY % gridSize;
     
     ctx.beginPath();
-    for (let x = offsetX - gridSize; x < width + gridSize; x += gridSize) {
-      ctx.moveTo(x, 0); ctx.lineTo(x, height);
+    for (let x = offsetX - gridSize; x < canvas.width + gridSize; x += gridSize) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height);
     }
-    for (let y = offsetY - gridSize; y < height + gridSize; y += gridSize) {
-      ctx.moveTo(0, y); ctx.lineTo(width, y);
+    for (let y = offsetY - gridSize; y < canvas.height + gridSize; y += gridSize) {
+      ctx.moveTo(0, y); ctx.lineTo(canvas.width, y);
     }
     ctx.stroke();
     ctx.restore();
   }
 
-  private drawPlayer(p: PlayerState, cameraX: number, cameraY: number, isLocal: boolean) {
-    const { ctx } = this;
-    const x = p.x - cameraX;
-    const y = p.y - cameraY;
-
-    ctx.save();
-    ctx.translate(x, y);
-    
-    // Draw body
-    ctx.beginPath();
-    ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 15;
-    ctx.fill();
-    
-    // Draw outline
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    // Draw ID
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '10px "JetBrains Mono"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(isLocal ? 'YOU' : p.id.slice(0, 4), 0, -p.radius - 15);
-
-    // Draw HP Bar
-    const hpPercent = Math.max(0, p.hp / p.maxHp);
-    const barWidth = 30;
-    const barHeight = 4;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(-barWidth / 2, -p.radius - 10, barWidth, barHeight);
-    ctx.fillStyle = hpPercent > 0.3 ? '#22c55e' : '#ef4444';
-    ctx.fillRect(-barWidth / 2, -p.radius - 10, barWidth * hpPercent, barHeight);
-
-    ctx.restore();
-  }
-
-  private drawEnemy(e: EnemyState, cameraX: number, cameraY: number) {
-    const { ctx } = this;
-    const x = e.x - cameraX;
-    const y = e.y - cameraY;
-
-    ctx.save();
-    ctx.translate(x, y);
-    
-    ctx.beginPath();
-    ctx.arc(0, 0, e.radius, 0, Math.PI * 2);
-    ctx.fillStyle = e.color;
-    ctx.shadowColor = e.color;
-    ctx.shadowBlur = 15;
-    ctx.fill();
-    
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    // Draw HP Bar
-    const hpPercent = Math.max(0, e.hp / e.maxHp);
-    const barWidth = 30;
-    const barHeight = 4;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(-barWidth / 2, -e.radius - 10, barWidth, barHeight);
-    ctx.fillStyle = '#ef4444';
-    ctx.fillRect(-barWidth / 2, -e.radius - 10, barWidth * hpPercent, barHeight);
-
-    ctx.restore();
-  }
-
-  private drawProjectile(p: ProjectileState, cameraX: number, cameraY: number) {
-    const { ctx } = this;
-    const x = p.x - cameraX;
-    const y = p.y - cameraY;
-
-    ctx.beginPath();
-    ctx.arc(x, y, p.radius, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 10;
-    ctx.fill();
-  }
-
-  private drawParticle(p: ParticleState, cameraX: number, cameraY: number) {
-    const { ctx } = this;
-    const x = p.x - cameraX;
-    const y = p.y - cameraY;
-
-    ctx.globalAlpha = p.alpha;
-    ctx.beginPath();
-    ctx.arc(x, y, p.radius, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-
-  private drawPortal(p: any, cameraX: number, cameraY: number, time: number) {
-    const { ctx } = this;
-    const x = p.x - cameraX;
-    const y = p.y - cameraY;
-
-    ctx.save();
-    ctx.translate(x, y);
-
-    // Draw outer ring
-    ctx.beginPath();
-    ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth = 4;
-    ctx.setLineDash([10, 10]);
-    ctx.lineDashOffset = -time * 20;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 15;
-    ctx.stroke();
-
-    // Draw inner glow
-    ctx.beginPath();
-    ctx.arc(0, 0, p.radius * 0.8, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.globalAlpha = 0.2 + Math.sin(time * 3) * 0.1;
-    ctx.fill();
-
-    // Draw label
-    ctx.globalAlpha = 1;
-    ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 14px "JetBrains Mono"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(p.label, 0, 0);
-
-    ctx.restore();
-  }
-
-  private drawCredit(c: CreditState, cameraX: number, cameraY: number, time: number) {
-    const { ctx } = this;
-    const x = c.x - cameraX;
-    const y = c.y - cameraY;
-
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(time * 2);
-    const scale = 1 + Math.sin(time * 5) * 0.15;
-    ctx.scale(scale, scale);
-
-    ctx.beginPath();
-    ctx.moveTo(0, -12);
-    ctx.quadraticCurveTo(4, -4, 12, 0);
-    ctx.quadraticCurveTo(4, 4, 0, 12);
-    ctx.quadraticCurveTo(-4, 4, -12, 0);
-    ctx.quadraticCurveTo(-4, -4, 0, -12);
-    
-    ctx.fillStyle = '#06b6d4';
-    ctx.shadowColor = '#06b6d4';
-    ctx.shadowBlur = 15;
-    ctx.fill();
-    
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    ctx.restore();
-  }
-
-  private drawUI(engine: ClientEngine, player: PlayerState) {
+  private drawUI(engine: GameEngine) {
     const { canvas, ctx } = this;
+    if (engine.gameOver) return;
 
     // --- Player HP Bar (Cyberpunk Style) ---
     const hpBarWidth = 300;
     const hpBarHeight = 14;
     const hpBarX = canvas.width / 2 - hpBarWidth / 2;
     const hpBarY = canvas.height - 50;
-    const hpPercent = Math.max(0, player.hp / player.maxHp);
+    const hpPercent = Math.max(0, engine.player.hp / engine.player.maxHp);
     const isLowHp = hpPercent < 0.3;
 
     ctx.save();
@@ -370,79 +190,160 @@ export class Renderer {
     
     ctx.textAlign = 'right';
     ctx.fillStyle = isLowHp ? '#ef4444' : '#06b6d4';
-    ctx.fillText(`${Math.ceil(Math.max(0, player.hp))} / ${player.maxHp}`, hpBarX + hpBarWidth, hpBarY - 6);
+    ctx.fillText(`${Math.ceil(Math.max(0, engine.player.hp))} / ${engine.player.maxHp}`, hpBarX + hpBarWidth, hpBarY - 6);
     ctx.restore();
 
-    // Boss Bar hidden as requested
+    // --- Boss Bar (Cyberpunk Style) ---
+    const boss = engine.enemies.reduce((prev, current) => (prev && prev.maxHp > current.maxHp) ? prev : current, null as any);
+    if (boss && boss.maxHp >= 300) {
+      const bossBarWidth = canvas.width * 0.5;
+      const bossBarHeight = 18;
+      const bossBarX = canvas.width / 2 - bossBarWidth / 2;
+      const bossBarY = 40;
+      const bossHpPercent = Math.max(0, boss.hp / boss.maxHp);
+
+      ctx.save();
+      // Danger Brackets
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 15;
+      
+      ctx.beginPath();
+      ctx.moveTo(bossBarX - 15, bossBarY + bossBarHeight + 8);
+      ctx.lineTo(bossBarX - 15, bossBarY - 8);
+      ctx.lineTo(bossBarX + 20, bossBarY - 8);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(bossBarX + bossBarWidth + 15, bossBarY + bossBarHeight + 8);
+      ctx.lineTo(bossBarX + bossBarWidth + 15, bossBarY - 8);
+      ctx.lineTo(bossBarX + bossBarWidth - 20, bossBarY - 8);
+      ctx.stroke();
+
+      // Background
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(20, 0, 0, 0.8)';
+      ctx.fillRect(bossBarX, bossBarY, bossBarWidth, bossBarHeight);
+
+      // Fill
+      ctx.fillStyle = '#ef4444';
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 12;
+      ctx.fillRect(bossBarX, bossBarY, bossBarWidth * bossHpPercent, bossBarHeight);
+
+      // Segments
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      const bossSegments = 20;
+      for (let i = 1; i < bossSegments; i++) {
+        ctx.fillRect(bossBarX + (bossBarWidth / bossSegments) * i - 1, bossBarY, 2, bossBarHeight);
+      }
+
+      // Text
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 8;
+      ctx.font = 'bold 16px "JetBrains Mono", monospace, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`⚠ WARNING: ELITE THREAT DETECTED ⚠`, canvas.width / 2, bossBarY - 12);
+      ctx.restore();
+    }
 
     // Score & Credits
     ctx.textAlign = 'left';
     ctx.font = '24px "JetBrains Mono", monospace, sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(`SCORE: ${player.score}`, 20, 40);
+    ctx.fillText(`SCORE: ${engine.score}`, 20, 40);
     
     ctx.fillStyle = '#06b6d4';
-    ctx.fillText(`CREDITS: ${player.credits}`, 20, 70);
+    ctx.fillText(`CREDITS: ${engine.collectedCredits}`, 20, 70);
 
-    // Room Info
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#eab308';
-    ctx.fillText(`ROOM: ${engine.state?.type.toUpperCase()}`, canvas.width - 20, 40);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '16px "JetBrains Mono"';
-    ctx.fillText(`PLAYERS: ${Object.keys(engine.state?.players || {}).length}`, canvas.width - 20, 70);
+    // Faint right joystick base
+    const rightJoyX = canvas.width - 150;
+    const rightJoyY = canvas.height - 150;
+    ctx.beginPath();
+    ctx.arc(rightJoyX, rightJoyY, 60, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Skill Slots
+    for (let i = 0; i < 3; i++) {
+      const pos = engine.getSkillPos(i);
+      const skill = engine.skills[i];
+      const radius = 35;
+
+      // Slot Background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      if (skill) {
+        // Skill Icon/Name
+        ctx.fillStyle = skill.color;
+        ctx.font = 'bold 12px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(skill.name, pos.x, pos.y);
+
+        // Cooldown Overlay
+        if (skill.currentCooldown > 0) {
+          const cdRatio = skill.currentCooldown / skill.cooldown;
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.beginPath();
+          ctx.moveTo(pos.x, pos.y);
+          ctx.arc(pos.x, pos.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * cdRatio);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 16px "JetBrains Mono"';
+          ctx.fillText(Math.ceil(skill.currentCooldown).toString(), pos.x, pos.y);
+        }
+      } else {
+        // Empty Slot
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.font = '24px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('+', pos.x, pos.y);
+      }
+    }
 
     // Joysticks
-    const drawJoystick = (joy: any, color: string, label?: string, cooldownProgress?: number) => {
-      if (!joy.active && !joy.isFixed) return;
-      
-      const alpha = joy.active ? 0.3 : 0.1;
-      const strokeAlpha = joy.active ? 0.5 : 0.2;
-      
+    const drawJoystick = (joy: JoystickData, color: string) => {
+      if (!joy.active) return;
       ctx.beginPath();
       ctx.arc(joy.originX, joy.originY, joy.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${color}, ${alpha})`;
+      ctx.fillStyle = `rgba(${color}, 0.1)`;
       ctx.fill();
-      ctx.strokeStyle = `rgba(${color}, ${strokeAlpha})`;
+      ctx.strokeStyle = `rgba(${color}, 0.3)`;
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.closePath();
 
-      if (cooldownProgress !== undefined && cooldownProgress < 1) {
-        ctx.beginPath();
-        ctx.moveTo(joy.originX, joy.originY);
-        ctx.arc(joy.originX, joy.originY, joy.radius, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * cooldownProgress);
-        ctx.fillStyle = `rgba(0, 0, 0, 0.5)`;
-        ctx.fill();
-        ctx.closePath();
-      }
-
       ctx.beginPath();
       ctx.arc(joy.x, joy.y, joy.knobRadius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${color}, ${joy.active ? 0.8 : 0.4})`;
+      ctx.fillStyle = `rgba(${color}, 0.5)`;
       ctx.fill();
       ctx.closePath();
-
-      if (label) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '10px "JetBrains Mono"';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, joy.originX, joy.originY);
-      }
     };
 
     drawJoystick(engine.leftJoystick, '255, 255, 255');
-    drawJoystick(engine.rightJoystick, '234, 179, 8', 'FIRE');
+    drawJoystick(engine.rightJoystick, '234, 179, 8');
     
-    for (const sj of engine.skillJoysticks) {
-      const skill = player.skills[sj.skillIndex];
-      if (skill) {
-        const now = Date.now();
-        const timeSinceUsed = now - skill.lastUsed;
-        const progress = Math.min(1, timeSinceUsed / skill.cooldown);
-        drawJoystick(sj, '6, 182, 212', skill.name.slice(0, 4).toUpperCase(), progress);
-      }
+    if (engine.activeSkillIndex !== null && engine.skillJoystick.active) {
+      ctx.beginPath();
+      ctx.arc(engine.skillJoystick.x, engine.skillJoystick.y, engine.skillJoystick.knobRadius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.fill();
     }
   }
 }
