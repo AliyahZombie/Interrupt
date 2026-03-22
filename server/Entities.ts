@@ -1,6 +1,6 @@
 import { PlayerState, EnemyState, ProjectileState, CreditState, ParticleState } from '../src/shared/types';
 import { Room } from './Room';
-import { Skill, DashSkill } from './Skills';
+import { Skill, DashSkill, BounceSkill } from './Skills';
 
 export abstract class Entity {
   id: string;
@@ -32,6 +32,7 @@ export class Player extends Entity {
     this.score = score;
     this.credits = credits;
     this.skills.push(new DashSkill()); // Default skill
+    this.skills.push(new BounceSkill()); // Second skill
   }
 
   getState(): PlayerState {
