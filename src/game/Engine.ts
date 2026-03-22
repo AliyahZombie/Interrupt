@@ -1,5 +1,5 @@
 import { Player, Projectile, BaseEnemy, MeleeEnemy, RangedEnemy, Particle, GameState, Credit, Tile } from './Entities';
-import { Skill, DashSkill } from './Skills';
+import { Skill, DashSkill, BounceSkill } from './Skills';
 import { Renderer } from './Renderer';
 
 export interface JoystickData {
@@ -26,7 +26,7 @@ export class GameEngine {
   rightJoystick: JoystickData = { active: false, originX: 0, originY: 0, x: 0, y: 0, radius: 60, knobRadius: 25, touchId: null };
   skillJoystick: JoystickData = { active: false, originX: 0, originY: 0, x: 0, y: 0, radius: 40, knobRadius: 20, touchId: null };
   
-  skills: (Skill | null)[] = [new DashSkill(), null, null]; // 3 Skill slots
+  skills: (Skill | null)[] = [new DashSkill(), new BounceSkill(), null]; // 3 Skill slots
   activeSkillIndex: number | null = null;
   
   projectiles: Projectile[] = [];
@@ -42,6 +42,12 @@ export class GameEngine {
   collectedCredits: number = 0;
   gameStarted: boolean = false;
   gameOver: boolean = false;
+
+  debugFlags = {
+    stopSpawning: false,
+    godMode: false,
+    noCooldowns: false
+  };
 
   onStateChange?: (state: 'START' | 'PLAYING' | 'GAME_OVER') => void;
   onScoreChange?: (score: number, credits: number) => void;
@@ -90,22 +96,6 @@ export class GameEngine {
     this.particles = [];
     this.credits = [];
     this.tiles = [];
-    
-    // Generate some random tiles
-    for (let i = 0; i < 30; i++) {
-      const isFixed = Math.random() > 0.4;
-      const size = 80 + Math.random() * 100;
-      this.tiles.push(new Tile(
-        Math.random() * this.world.width,
-        Math.random() * this.world.height,
-        size,
-        size,
-        isFixed,
-        0, 0,
-        size * size * 0.01, // mass
-        isFixed ? '#1e293b' : '#334155'
-      ));
-    }
     
     this.score = 0;
     this.collectedCredits = 0;
@@ -234,6 +224,7 @@ export class GameEngine {
   }
 
   spawnEnemy(cameraX: number, cameraY: number, time: number) {
+    if (this.debugFlags.stopSpawning) return;
     if (time - this.lastSpawn > 1500) {
       const spawnEdge = Math.floor(Math.random() * 4);
       let ex = 0, ey = 0;
@@ -353,7 +344,7 @@ export class GameEngine {
           }
         }
       } else {
-        if (!this.player.isDashing && Math.hypot(p.x - this.player.x, p.y - this.player.y) < this.player.radius + 5) {
+        if (!this.player.isDashing && !this.debugFlags.godMode && Math.hypot(p.x - this.player.x, p.y - this.player.y) < this.player.radius + 5) {
           this.player.hp -= p.damage;
           hit = true;
           for(let k=0; k<5; k++) {

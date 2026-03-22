@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Maximize, Minimize } from 'lucide-react';
+import { Maximize, Minimize, Bug } from 'lucide-react';
 import { GameEngine } from '../game/Engine';
-import { CyberButton } from './ui/CyberButton';
-import { CyberPanel } from './ui/CyberPanel';
-import { CyberText } from './ui/CyberText';
+import { RangedEnemy, MeleeEnemy } from '../game/Entities';
+import { CyberButton, CyberPanel, CyberText, CyberBadge, CyberInput, CyberProgressBar, CyberGlitchText, CyberModal } from './ui';
 
 export const Game = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -14,6 +13,13 @@ export const Game = () => {
   const [gameState, setGameState] = useState<'START' | 'PLAYING' | 'GAME_OVER'>('START');
   const [score, setScore] = useState(0);
   const [credits, setCredits] = useState(0);
+  const [showUIPreview, setShowUIPreview] = useState(false);
+  const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
+  const [debugFlags, setDebugFlags] = useState({
+    stopSpawning: false,
+    godMode: false,
+    noCooldowns: false
+  });
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -94,18 +100,144 @@ export const Game = () => {
         style={{ touchAction: 'none' }}
       />
       
+      {/* Debug Button */}
+      <div className="absolute top-4 left-4 z-50">
+        <button 
+          onClick={() => setIsDebugPanelOpen(true)}
+          className="p-2 bg-black/50 border border-cyan-500/30 text-cyan-500 rounded hover:bg-cyan-900/50 transition-colors"
+        >
+          <Bug size={24} />
+        </button>
+      </div>
+
+      {/* Debug Modal */}
+      <CyberModal
+        isOpen={isDebugPanelOpen}
+        onClose={() => setIsDebugPanelOpen(false)}
+        title="DEBUG PANEL"
+        variant="cyan"
+        actions={<CyberButton variant="ghost" onClick={() => setIsDebugPanelOpen(false)}>CLOSE</CyberButton>}
+      >
+        <div className="space-y-6">
+          <div className="flex flex-col gap-3">
+            <CyberText variant="label" color="cyan">ACTIONS</CyberText>
+            <div className="grid grid-cols-2 gap-2">
+              <CyberButton variant="danger" onClick={() => {
+                if (engineRef.current) engineRef.current.enemies = [];
+              }}>CLEAR ENEMIES</CyberButton>
+              <CyberButton variant="primary" onClick={() => {
+                if (engineRef.current) {
+                  const { player } = engineRef.current;
+                  engineRef.current.enemies.push(new RangedEnemy(player.x + 200, player.y));
+                }
+              }}>SPAWN RANGED</CyberButton>
+              <CyberButton variant="primary" onClick={() => {
+                if (engineRef.current) {
+                  const { player } = engineRef.current;
+                  engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y));
+                }
+              }}>SPAWN MELEE</CyberButton>
+            </div>
+          </div>
+          
+          <div className="flex flex-col gap-3">
+            <CyberText variant="label" color="cyan">TOGGLES</CyberText>
+            <div className="flex flex-col gap-3">
+              <label className="flex items-center gap-3 text-white font-mono uppercase text-sm cursor-pointer">
+                <input type="checkbox" checked={debugFlags.stopSpawning} onChange={(e) => {
+                  const val = e.target.checked;
+                  setDebugFlags(prev => ({...prev, stopSpawning: val}));
+                  if (engineRef.current) engineRef.current.debugFlags.stopSpawning = val;
+                }} className="w-5 h-5 accent-cyan-500" />
+                STOP SPAWNING
+              </label>
+              <label className="flex items-center gap-3 text-white font-mono uppercase text-sm cursor-pointer">
+                <input type="checkbox" checked={debugFlags.godMode} onChange={(e) => {
+                  const val = e.target.checked;
+                  setDebugFlags(prev => ({...prev, godMode: val}));
+                  if (engineRef.current) engineRef.current.debugFlags.godMode = val;
+                }} className="w-5 h-5 accent-cyan-500" />
+                GOD MODE
+              </label>
+              <label className="flex items-center gap-3 text-white font-mono uppercase text-sm cursor-pointer">
+                <input type="checkbox" checked={debugFlags.noCooldowns} onChange={(e) => {
+                  const val = e.target.checked;
+                  setDebugFlags(prev => ({...prev, noCooldowns: val}));
+                  if (engineRef.current) engineRef.current.debugFlags.noCooldowns = val;
+                }} className="w-5 h-5 accent-cyan-500" />
+                NO COOLDOWNS
+              </label>
+            </div>
+          </div>
+        </div>
+      </CyberModal>
+
       {/* UI Overlays */}
       {gameState === 'START' && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-20">
           <CyberPanel variant="cyan" className="flex flex-col items-center text-center">
-            <CyberText variant="h1" color="cyan" glow className="mb-2">SURVIVOR</CyberText>
+            <CyberGlitchText text="SURVIVOR" color="cyan" className="text-5xl md:text-7xl mb-2" />
             <CyberText variant="label" color="neutral" className="mb-8">SYSTEM INITIALIZATION READY</CyberText>
-            <CyberButton variant="primary" onClick={handleStartGame}>
-              START GAME
-            </CyberButton>
+            <div className="flex flex-col gap-4 w-full">
+              <CyberButton variant="primary" onClick={handleStartGame}>
+                START GAME
+              </CyberButton>
+              <CyberButton variant="ghost" onClick={() => setShowUIPreview(true)}>
+                UI COMPONENTS
+              </CyberButton>
+            </div>
           </CyberPanel>
         </div>
       )}
+
+      {/* UI Preview Modal */}
+      <CyberModal 
+        isOpen={showUIPreview} 
+        onClose={() => setShowUIPreview(false)} 
+        title="UI COMPONENT LIBRARY"
+        variant="cyan"
+        actions={
+          <CyberButton variant="ghost" onClick={() => setShowUIPreview(false)}>CLOSE</CyberButton>
+        }
+      >
+        <div className="flex flex-col gap-8 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
+          
+          <div className="flex flex-col gap-2">
+            <CyberText variant="label" color="cyan">Badges</CyberText>
+            <div className="flex flex-wrap gap-2">
+              <CyberBadge variant="cyan" glow>Active</CyberBadge>
+              <CyberBadge variant="red" glow>Danger</CyberBadge>
+              <CyberBadge variant="yellow" glow>Warning</CyberBadge>
+              <CyberBadge variant="purple" glow>Epic</CyberBadge>
+              <CyberBadge variant="neutral">Offline</CyberBadge>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <CyberText variant="label" color="cyan">Progress Bars</CyberText>
+            <div className="flex flex-col gap-4">
+              <CyberProgressBar value={75} max={100} variant="cyan" label="HP" showValue />
+              <CyberProgressBar value={30} max={100} variant="red" label="SHIELD" showValue />
+              <CyberProgressBar value={90} max={100} variant="yellow" label="ENERGY" showValue />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <CyberText variant="label" color="cyan">Inputs</CyberText>
+            <CyberInput label="USERNAME" placeholder="Enter alias..." />
+            <CyberInput label="PASSWORD" type="password" placeholder="Enter key..." error="Invalid access key" />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <CyberText variant="label" color="cyan">Glitch Text</CyberText>
+            <div className="flex flex-col gap-2">
+              <CyberGlitchText text="SYSTEM COMPROMISED" color="red" className="text-xl" />
+              <CyberGlitchText text="UPLOADING VIRUS..." color="cyan" className="text-xl" />
+            </div>
+          </div>
+
+        </div>
+      </CyberModal>
 
       {gameState === 'GAME_OVER' && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-20">

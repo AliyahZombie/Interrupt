@@ -258,7 +258,7 @@ export class MeleeEnemy extends BaseEnemy {
     }
 
     if (dist < this.radius + state.player.radius) {
-      if (!state.player.isDashing) {
+      if (!state.player.isDashing && !(state as any).debugFlags?.godMode) {
         state.player.hp -= 50 * dt;
       }
     }

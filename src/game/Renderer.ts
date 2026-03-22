@@ -35,7 +35,6 @@ export class Renderer {
     ctx.restore();
 
     // Entities
-    engine.tiles.forEach(t => t.draw(ctx, cameraX, cameraY));
     engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, performance.now() / 1000));
     engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
     engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY));
@@ -194,6 +193,7 @@ export class Renderer {
     ctx.restore();
 
     // --- Boss Bar (Cyberpunk Style) ---
+    /*
     const boss = engine.enemies.reduce((prev, current) => (prev && prev.maxHp > current.maxHp) ? prev : current, null as any);
     if (boss && boss.maxHp >= 300) {
       const bossBarWidth = canvas.width * 0.5;
@@ -250,6 +250,7 @@ export class Renderer {
       ctx.fillText(`⚠ WARNING: ELITE THREAT DETECTED ⚠`, canvas.width / 2, bossBarY - 12);
       ctx.restore();
     }
+    */
 
     // Score & Credits
     ctx.textAlign = 'left';
