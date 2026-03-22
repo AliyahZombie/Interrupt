@@ -78,9 +78,21 @@ export class Room {
         player.x += player.vx * dt;
         player.y += player.vy * dt;
 
+        // Skills logic
+        if (input.skills && input.skills.length > 0) {
+          for (const skillInput of input.skills) {
+            const skill = player.skills[skillInput.index];
+            if (skill) {
+              skill.activate(player, this, skillInput.aimX, skillInput.aimY);
+            }
+          }
+          // Clear skills after processing to prevent multiple activations from same input
+          input.skills = [];
+        }
+
         if (input.x !== undefined && input.y !== undefined) {
           // Trust client position if it's reasonably close to server simulation
-          if (Math.hypot(player.x - input.x, player.y - input.y) < 200) {
+          if (Math.hypot(player.x - input.x, player.y - input.y) < 100) {
             player.x = input.x;
             player.y = input.y;
           }
@@ -102,18 +114,6 @@ export class Room {
           }
         }
         if (changedRoom) continue;
-
-        // Skills logic
-        if (input.skills && input.skills.length > 0) {
-          for (const skillInput of input.skills) {
-            const skill = player.skills[skillInput.index];
-            if (skill) {
-              skill.activate(player, this, skillInput.aimX, skillInput.aimY);
-            }
-          }
-          // Clear skills after processing to prevent multiple activations from same input
-          input.skills = [];
-        }
 
         // Shooting logic (basic)
         if (input.shooting && this.type !== 'city') {

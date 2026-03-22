@@ -38,6 +38,7 @@ export class ClientEngine {
   
   localPlayerX?: number;
   localPlayerY?: number;
+  lastDashTime: number = 0;
   
   onStateChange?: (state: 'START' | 'PLAYING' | 'GAME_OVER') => void;
   onScoreChange?: (score: number, credits: number) => void;
@@ -68,9 +69,9 @@ export class ClientEngine {
       if (this.playerId && newState.players[this.playerId]) {
         const serverPlayer = newState.players[this.playerId];
         
-        // If distance is huge (teleport/respawn), sync with server
+        // If distance is huge (teleport/respawn/rejected prediction), sync with server
         if (this.localPlayerX === undefined || this.localPlayerY === undefined ||
-            Math.hypot(this.localPlayerX - serverPlayer.x, this.localPlayerY - serverPlayer.y) > 200) {
+            Math.hypot(this.localPlayerX - serverPlayer.x, this.localPlayerY - serverPlayer.y) > 100) {
           this.localPlayerX = serverPlayer.x;
           this.localPlayerY = serverPlayer.y;
         }
@@ -340,6 +341,39 @@ export class ClientEngine {
         aimX = dx / dist;
         aimY = dy / dist;
         shooting = true;
+      }
+    }
+
+    // Predict dash
+    if (this.localPlayerX !== undefined && this.localPlayerY !== undefined) {
+      for (const skill of this.pendingSkills) {
+        const skillState = this.state.players[this.playerId].skills[skill.index];
+        if (skillState && skillState.name === 'Dash') {
+          const now = Date.now();
+          if (now - this.lastDashTime >= skillState.cooldown) {
+            this.lastDashTime = now;
+            const dashDistance = 150;
+            let dx = skill.aimX;
+            let dy = skill.aimY;
+            if (dx === 0 && dy === 0) {
+              if (moveX !== 0 || moveY !== 0) {
+                const len = Math.hypot(moveX, moveY);
+                dx = moveX / len;
+                dy = moveY / len;
+              } else {
+                dx = 1;
+                dy = 0;
+              }
+            }
+            this.localPlayerX += dx * dashDistance;
+            this.localPlayerY += dy * dashDistance;
+            
+            // Constrain to map
+            const playerRadius = this.state.players[this.playerId].radius;
+            this.localPlayerX = Math.max(playerRadius, Math.min(this.state.width - playerRadius, this.localPlayerX));
+            this.localPlayerY = Math.max(playerRadius, Math.min(this.state.height - playerRadius, this.localPlayerY));
+          }
+        }
       }
     }
 
