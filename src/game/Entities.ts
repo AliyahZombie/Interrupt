@@ -1,11 +1,87 @@
+import type { Difficulty, DifficultyRules } from './Difficulty';
+
 export interface GameState {
   player: Player;
   projectiles: Projectile[];
   particles: Particle[];
   tiles: Tile[];
+  enemies: BaseEnemy[];
   score: number;
   time: number;
+  difficulty: Difficulty;
+  rules: DifficultyRules;
+  debugFlags: {
+    stopSpawning: boolean;
+    godMode: boolean;
+    noCooldowns: boolean;
+  };
 }
+
+const clamp = (value: number, min: number, max: number) => {
+  return Math.max(min, Math.min(max, value));
+};
+
+const normalize = (x: number, y: number) => {
+  const len = Math.hypot(x, y);
+  if (len <= 1e-6) return { x: 0, y: 0 };
+  return { x: x / len, y: y / len };
+};
+
+const computeSeparation = (self: BaseEnemy, enemies: BaseEnemy[], range: number) => {
+  let sx = 0;
+  let sy = 0;
+  for (const other of enemies) {
+    if (other === self) continue;
+    const dx = self.x - other.x;
+    const dy = self.y - other.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 1e-6 || dist >= range) continue;
+    const strength = 1 - dist / range;
+    sx += (dx / dist) * strength;
+    sy += (dy / dist) * strength;
+  }
+  return { x: sx, y: sy };
+};
+
+const computeBulletDodge = (
+  self: BaseEnemy,
+  projectiles: Projectile[],
+  detectionRange: number,
+  extraClearance: number
+) => {
+  let ax = 0;
+  let ay = 0;
+  for (const p of projectiles) {
+    if (!p.isPlayer) continue;
+    const vLen = Math.hypot(p.vx, p.vy);
+    if (vLen <= 1e-6) continue;
+
+    const rx = self.x - p.x;
+    const ry = self.y - p.y;
+    const distToProjectile = Math.hypot(rx, ry);
+    if (distToProjectile > detectionRange) continue;
+
+    const dot = (p.vx * rx + p.vy * ry) / vLen;
+    if (dot <= 0) continue;
+
+    const crossZ = p.vx * ry - p.vy * rx;
+    const perpDist = Math.abs(crossZ) / vLen;
+    const clearance = self.radius + extraClearance;
+    if (perpDist > clearance) continue;
+
+    let perpX = -p.vy / vLen;
+    let perpY = p.vx / vLen;
+    if (crossZ < 0) {
+      perpX = -perpX;
+      perpY = -perpY;
+    }
+
+    const threat = (1 - perpDist / clearance) * (1 - distToProjectile / detectionRange);
+    ax += perpX * threat;
+    ay += perpY * threat;
+  }
+  return { x: ax, y: ay };
+};
 
 export class Tile {
   constructor(
@@ -242,6 +318,10 @@ export abstract class BaseEnemy {
 }
 
 export class MeleeEnemy extends BaseEnemy {
+  swirlDirection: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
+  vx: number = 0;
+  vy: number = 0;
+
   constructor(x: number, y: number) {
     super(x, y, 18, 120 + Math.random() * 50, 300, 300, '#ef4444');
   }
@@ -250,16 +330,62 @@ export class MeleeEnemy extends BaseEnemy {
     const dx = state.player.x - this.x;
     const dy = state.player.y - this.y;
     const dist = Math.hypot(dx, dy);
-    
-    if (dist > 0) {
-      const angle = Math.atan2(dy, dx);
-      this.x += Math.cos(angle) * this.speed * dt;
-      this.y += Math.sin(angle) * this.speed * dt;
+
+    let moveX = 0;
+    let moveY = 0;
+
+    if (dist > 1e-6) {
+      const ux = dx / dist;
+      const uy = dy / dist;
+      moveX += ux;
+      moveY += uy;
+      moveX += (-uy * this.swirlDirection) * 0.25;
+      moveY += (ux * this.swirlDirection) * 0.25;
     }
 
+    const sep = computeSeparation(this, state.enemies, 120);
+    moveX += sep.x * 1.6;
+    moveY += sep.y * 1.6;
+
+    if (state.rules.enemiesDodgeBullets) {
+      const dodge = computeBulletDodge(this, state.projectiles, 260, 18);
+      moveX += dodge.x * 2.2;
+      moveY += dodge.y * 2.2;
+    }
+
+    const forceLen = Math.hypot(moveX, moveY);
+    const desiredSpeed = this.speed * clamp(forceLen, 0, 1);
+    const dir = forceLen <= 1e-6 ? { x: 0, y: 0 } : { x: moveX / forceLen, y: moveY / forceLen };
+
+    const desiredVx = dir.x * desiredSpeed;
+    const desiredVy = dir.y * desiredSpeed;
+
+    const maxAccel = 1800;
+    const ax = (desiredVx - this.vx) / Math.max(dt, 1e-6);
+    const ay = (desiredVy - this.vy) / Math.max(dt, 1e-6);
+    const aLen = Math.hypot(ax, ay);
+    const accelScale = aLen > maxAccel ? maxAccel / aLen : 1;
+    this.vx += ax * accelScale * dt;
+    this.vy += ay * accelScale * dt;
+
+    const damping = 7;
+    const dampFactor = Math.exp(-damping * dt);
+    this.vx *= dampFactor;
+    this.vy *= dampFactor;
+
+    const vLen = Math.hypot(this.vx, this.vy);
+    const vMax = this.speed;
+    if (vLen > vMax && vLen > 1e-6) {
+      this.vx = (this.vx / vLen) * vMax;
+      this.vy = (this.vy / vLen) * vMax;
+    }
+
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+
     if (dist < this.radius + state.player.radius) {
-      if (!state.player.isDashing && !(state as any).debugFlags?.godMode) {
-        state.player.hp -= 50 * dt;
+      if (!state.player.isDashing && !state.debugFlags.godMode) {
+        state.player.hp -= 50 * dt * state.rules.playerDamageMultiplier;
       }
     }
   }
@@ -267,6 +393,7 @@ export class MeleeEnemy extends BaseEnemy {
 
 export class RangedEnemy extends BaseEnemy {
   lastShot: number = 0;
+  orbitDirection: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
 
   constructor(x: number, y: number) {
     super(x, y, 15, 80 + Math.random() * 40, 100, 100, '#a855f7');
@@ -278,13 +405,40 @@ export class RangedEnemy extends BaseEnemy {
     const dist = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx);
 
-    if (dist > 400) {
-      this.x += Math.cos(angle) * this.speed * dt;
-      this.y += Math.sin(angle) * this.speed * dt;
-    } else if (dist < 300) {
-      this.x -= Math.cos(angle) * (this.speed * 0.5) * dt;
-      this.y -= Math.sin(angle) * (this.speed * 0.5) * dt;
+    let moveX = 0;
+    let moveY = 0;
+
+    if (dist > 1e-6) {
+      const ux = dx / dist;
+      const uy = dy / dist;
+
+      const orbitRadius = 360;
+      const orbitBand = 140;
+      const radialStrength = clamp((dist - orbitRadius) / orbitBand, -1, 1);
+
+      const tx = -uy * this.orbitDirection;
+      const ty = ux * this.orbitDirection;
+
+      moveX += tx * 1.1;
+      moveY += ty * 1.1;
+
+      moveX += ux * radialStrength * 0.9;
+      moveY += uy * radialStrength * 0.9;
     }
+
+    const sep = computeSeparation(this, state.enemies, 160);
+    moveX += sep.x * 2.1;
+    moveY += sep.y * 2.1;
+
+    if (state.rules.enemiesDodgeBullets) {
+      const dodge = computeBulletDodge(this, state.projectiles, 280, 18);
+      moveX += dodge.x * 2.0;
+      moveY += dodge.y * 2.0;
+    }
+
+    const move = normalize(moveX, moveY);
+    this.x += move.x * this.speed * dt;
+    this.y += move.y * this.speed * dt;
 
     if (state.time - this.lastShot > 2000) {
       state.projectiles.push(new Projectile(

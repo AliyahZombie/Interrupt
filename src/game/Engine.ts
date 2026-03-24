@@ -1,6 +1,7 @@
 import { Player, Projectile, BaseEnemy, MeleeEnemy, RangedEnemy, Particle, GameState, Credit, Tile } from './Entities';
 import { Skill, DashSkill, BounceSkill } from './Skills';
 import { Renderer } from './Renderer';
+import { Difficulty, DifficultyRules, getDifficultyRules } from './Difficulty';
 
 export interface JoystickData {
   active: boolean;
@@ -43,6 +44,9 @@ export class GameEngine {
   gameStarted: boolean = false;
   gameOver: boolean = false;
 
+  difficulty: Difficulty = 'NORMAL';
+  rules: DifficultyRules = getDifficultyRules('NORMAL');
+
   debugFlags = {
     stopSpawning: false,
     godMode: false,
@@ -71,6 +75,11 @@ export class GameEngine {
 
     this.handleResize();
     this.animationFrameId = requestAnimationFrame(this.loop);
+  }
+
+  setDifficulty(difficulty: Difficulty) {
+    this.difficulty = difficulty;
+    this.rules = getDifficultyRules(difficulty);
   }
 
   destroy() {
@@ -105,7 +114,10 @@ export class GameEngine {
     this.onScoreChange?.(this.score, this.collectedCredits);
   }
 
-  startGame() {
+  startGame(difficulty?: Difficulty) {
+    if (difficulty) {
+      this.setDifficulty(difficulty);
+    }
     this.gameStarted = true;
     this.resetGame();
     this.onStateChange?.('PLAYING');
@@ -131,7 +143,8 @@ export class GameEngine {
       const pos = this.getSkillPos(i);
       const dist = Math.hypot(e.clientX - pos.x, e.clientY - pos.y);
       if (dist <= 40) {
-        if (this.skills[i] && this.skills[i]!.currentCooldown <= 0) {
+        const skill = this.skills[i];
+        if (skill && (skill.currentCooldown <= 0 || this.debugFlags.noCooldowns)) {
           this.activeSkillIndex = i;
           this.skillJoystick.active = true;
           this.skillJoystick.originX = pos.x;
@@ -260,6 +273,12 @@ export class GameEngine {
   }
 
   update(dt: number, time: number) {
+    if (this.debugFlags.noCooldowns) {
+      this.skills.forEach(skill => {
+        if (skill) skill.currentCooldown = 0;
+      });
+    }
+
     // Update Skills
     this.skills.forEach(skill => {
       if (skill) skill.update(dt);
@@ -345,7 +364,7 @@ export class GameEngine {
         }
       } else {
         if (!this.player.isDashing && !this.debugFlags.godMode && Math.hypot(p.x - this.player.x, p.y - this.player.y) < this.player.radius + 5) {
-          this.player.hp -= p.damage;
+          this.player.hp -= p.damage * this.rules.playerDamageMultiplier;
           hit = true;
           for(let k=0; k<5; k++) {
             this.particles.push(new Particle(
@@ -374,6 +393,10 @@ export class GameEngine {
       tiles: this.tiles,
       score: this.score,
       time: time,
+      debugFlags: this.debugFlags,
+      difficulty: this.difficulty,
+      rules: this.rules,
+      enemies: this.enemies,
     };
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
