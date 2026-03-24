@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Maximize, Minimize, Bug } from 'lucide-react';
 import { GameEngine } from '../game/Engine';
 import { RangedEnemy, MeleeEnemy } from '../game/Entities';
+import type { Difficulty } from '../game/Difficulty';
 import { CyberButton, CyberPanel, CyberText, CyberBadge, CyberInput, CyberProgressBar, CyberGlitchText, CyberModal } from './ui';
 
 export const Game = () => {
@@ -11,6 +12,7 @@ export const Game = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [forceStart, setForceStart] = useState(false);
   const [gameState, setGameState] = useState<'START' | 'PLAYING' | 'GAME_OVER'>('START');
+  const [difficulty, setDifficulty] = useState<Difficulty>('NORMAL');
   const [score, setScore] = useState(0);
   const [credits, setCredits] = useState(0);
   const [showUIPreview, setShowUIPreview] = useState(false);
@@ -20,6 +22,11 @@ export const Game = () => {
     godMode: false,
     noCooldowns: false
   });
+
+  const debugFlagsRef = useRef(debugFlags);
+  useEffect(() => {
+    debugFlagsRef.current = debugFlags;
+  }, [debugFlags]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -54,6 +61,16 @@ export const Game = () => {
     if ((isPortrait && !forceStart) || !canvasRef.current) return;
     const engine = new GameEngine(canvasRef.current);
     engineRef.current = engine;
+
+    engine.debugFlags.stopSpawning = debugFlagsRef.current.stopSpawning;
+    engine.debugFlags.godMode = debugFlagsRef.current.godMode;
+    engine.debugFlags.noCooldowns = debugFlagsRef.current.noCooldowns;
+
+    // When the engine is recreated (e.g. rotation / resize), reset the UI state
+    // so we don't get stuck in PLAYING with a fresh engine that hasn't started.
+    setGameState('START');
+    setScore(0);
+    setCredits(0);
     
     engine.onStateChange = (state) => {
       setGameState(state);
@@ -72,25 +89,9 @@ export const Game = () => {
 
   const handleStartGame = () => {
     if (engineRef.current) {
-      engineRef.current.startGame();
+      engineRef.current.startGame(difficulty);
     }
   };
-
-  if (isPortrait && !forceStart) {
-    return (
-      <div className="flex items-center justify-center h-screen w-screen bg-cyber-bg text-white p-8 text-center bg-scanlines">
-        <CyberPanel variant="cyan" className="max-w-md">
-          <CyberText variant="h2" color="cyan" glow className="mb-4">ROTATE DEVICE</CyberText>
-          <CyberText variant="body" color="neutral" className="mb-8">
-            This game is designed to be played in landscape mode for the best experience.
-          </CyberText>
-          <CyberButton variant="ghost" onClick={() => setForceStart(true)}>
-            PLAY ANYWAY
-          </CyberButton>
-        </CyberPanel>
-      </div>
-    );
-  }
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cyber-bg">
@@ -101,10 +102,11 @@ export const Game = () => {
       />
       
       {/* Debug Button */}
-      <div className="absolute top-4 left-4 z-50">
+      <div className="absolute top-4 left-4 z-30">
         <button 
           onClick={() => setIsDebugPanelOpen(true)}
-          className="p-2 bg-black/50 border border-cyan-500/30 text-cyan-500 rounded hover:bg-cyan-900/50 transition-colors"
+          className="p-2 bg-black/50 border border-cyan-500/30 text-cyan-500 clip-chamfer-sm hover:bg-cyan-900/50 transition-colors"
+          aria-label="Open Debug Panel"
         >
           <Bug size={24} />
         </button>
@@ -163,7 +165,14 @@ export const Game = () => {
                 <input type="checkbox" checked={debugFlags.noCooldowns} onChange={(e) => {
                   const val = e.target.checked;
                   setDebugFlags(prev => ({...prev, noCooldowns: val}));
-                  if (engineRef.current) engineRef.current.debugFlags.noCooldowns = val;
+                  if (engineRef.current) {
+                    engineRef.current.debugFlags.noCooldowns = val;
+                    if (val) {
+                      engineRef.current.skills.forEach(skill => {
+                        if (skill) skill.currentCooldown = 0;
+                      });
+                    }
+                  }
                 }} className="w-5 h-5 accent-cyan-500" />
                 NO COOLDOWNS
               </label>
@@ -178,6 +187,39 @@ export const Game = () => {
           <CyberPanel variant="cyan" className="flex flex-col items-center text-center">
             <CyberGlitchText text="SURVIVOR" color="cyan" className="text-5xl md:text-7xl mb-2" />
             <CyberText variant="label" color="neutral" className="mb-8">SYSTEM INITIALIZATION READY</CyberText>
+
+            <div className="w-full mb-6">
+              <CyberText variant="label" color="cyan" className="mb-3">DIFFICULTY</CyberText>
+              <div className="grid grid-cols-3 gap-2">
+                <CyberButton
+                  variant={difficulty === 'EASY' ? 'primary' : 'ghost'}
+                  onClick={() => setDifficulty('EASY')}
+                  className="px-3 py-2"
+                >
+                  EASY
+                </CyberButton>
+                <CyberButton
+                  variant={difficulty === 'NORMAL' ? 'primary' : 'ghost'}
+                  onClick={() => setDifficulty('NORMAL')}
+                  className="px-3 py-2"
+                >
+                  NORMAL
+                </CyberButton>
+                <CyberButton
+                  variant={difficulty === 'HARD' ? 'danger' : 'ghost'}
+                  onClick={() => setDifficulty('HARD')}
+                  className="px-3 py-2"
+                >
+                  HARD
+                </CyberButton>
+              </div>
+              <CyberText variant="body" color="neutral" className="mt-3">
+                {difficulty === 'EASY' && 'PLAYER TAKES 50% DAMAGE'}
+                {difficulty === 'NORMAL' && 'STANDARD DAMAGE'}
+                {difficulty === 'HARD' && 'PLAYER TAKES 150% DAMAGE • ENEMIES DODGE BULLETS'}
+              </CyberText>
+            </div>
+
             <div className="flex flex-col gap-4 w-full">
               <CyberButton variant="primary" onClick={handleStartGame}>
                 START GAME
@@ -254,11 +296,25 @@ export const Game = () => {
 
       <button
         onClick={toggleFullscreen}
-        className="absolute top-4 right-4 z-30 p-2 bg-black/50 rounded-full text-white hover:bg-black/70 transition-colors border border-white/10"
+        className="absolute top-4 right-4 z-30 p-2 bg-black/50 clip-chamfer-sm text-white hover:bg-black/70 transition-colors border border-white/10"
         aria-label="Toggle Fullscreen"
       >
         {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
       </button>
+
+      {isPortrait && !forceStart && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-cyber-bg text-white p-8 text-center bg-scanlines">
+          <CyberPanel variant="cyan" className="max-w-md">
+            <CyberText variant="h2" color="cyan" glow className="mb-4">ROTATE DEVICE</CyberText>
+            <CyberText variant="body" color="neutral" className="mb-8">
+              This game is designed to be played in landscape mode for the best experience.
+            </CyberText>
+            <CyberButton variant="ghost" onClick={() => setForceStart(true)}>
+              PLAY ANYWAY
+            </CyberButton>
+          </CyberPanel>
+        </div>
+      )}
     </div>
   );
 };
