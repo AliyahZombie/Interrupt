@@ -134,12 +134,70 @@ export class Renderer {
     const { canvas, ctx } = this;
     if (engine.gameOver) return;
 
+    const player = engine.player;
+
+    if (player.maxShield > 0) {
+      const barWidth = 300;
+      const barHeight = 10;
+      const barX = canvas.width / 2 - barWidth / 2;
+      const hpBarY = canvas.height - 50;
+      const barY = hpBarY - 22;
+
+      const shieldPercent = Math.max(0, Math.min(1, player.shield / player.maxShield));
+      const isLowShield = shieldPercent < 0.25;
+
+      ctx.save();
+      ctx.strokeStyle = isLowShield ? '#eab308' : '#06b6d4';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = ctx.strokeStyle;
+      ctx.shadowBlur = 8;
+
+      ctx.beginPath();
+      ctx.moveTo(barX - 10, barY - 4);
+      ctx.lineTo(barX - 10, barY + barHeight + 4);
+      ctx.lineTo(barX - 2, barY + barHeight + 4);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(barX + barWidth + 10, barY - 4);
+      ctx.lineTo(barX + barWidth + 10, barY + barHeight + 4);
+      ctx.lineTo(barX + barWidth + 2, barY + barHeight + 4);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+
+      ctx.fillStyle = isLowShield ? '#eab308' : '#06b6d4';
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 10;
+      ctx.fillRect(barX, barY, barWidth * shieldPercent, barHeight);
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      const segments = 12;
+      for (let i = 1; i < segments; i++) {
+        ctx.fillRect(barX + (barWidth / segments) * i - 1, barY, 2, barHeight);
+      }
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px "JetBrains Mono", monospace, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('AUX.SHIELD', barX, barY - 6);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = isLowShield ? '#eab308' : '#06b6d4';
+      ctx.fillText(`${Math.ceil(Math.max(0, player.shield))} / ${player.maxShield}`, barX + barWidth, barY - 6);
+      ctx.restore();
+    }
+
     // --- Player HP Bar (Cyberpunk Style) ---
     const hpBarWidth = 300;
     const hpBarHeight = 14;
     const hpBarX = canvas.width / 2 - hpBarWidth / 2;
     const hpBarY = canvas.height - 50;
-    const hpPercent = Math.max(0, engine.player.hp / engine.player.maxHp);
+    const hpPercent = Math.max(0, player.hp / player.maxHp);
     const isLowHp = hpPercent < 0.3;
 
     ctx.save();
@@ -189,7 +247,7 @@ export class Renderer {
     
     ctx.textAlign = 'right';
     ctx.fillStyle = isLowHp ? '#ef4444' : '#06b6d4';
-    ctx.fillText(`${Math.ceil(Math.max(0, engine.player.hp))} / ${engine.player.maxHp}`, hpBarX + hpBarWidth, hpBarY - 6);
+    ctx.fillText(`${Math.ceil(Math.max(0, player.hp))} / ${player.maxHp}`, hpBarX + hpBarWidth, hpBarY - 6);
     ctx.restore();
 
     // --- Boss Bar (Cyberpunk Style) ---
@@ -260,6 +318,34 @@ export class Renderer {
     
     ctx.fillStyle = '#06b6d4';
     ctx.fillText(`CREDITS: ${engine.collectedCredits}`, 20, 70);
+
+    if (engine.debugFlags.showWaveDebug) {
+      const now = performance.now();
+      const waveAgeSec = Math.max(0, (now - engine.wave.startedAtMs) / 1000);
+      const phase = engine.wave.phase;
+      const intermissionLeftSec = phase === 'INTERMISSION'
+        ? Math.max(0, (engine.wave.intermissionUntilMs - now) / 1000)
+        : 0;
+
+      ctx.save();
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.font = 'bold 12px "JetBrains Mono", monospace, sans-serif';
+      ctx.fillStyle = '#06b6d4';
+      const x = canvas.width - 20;
+      let y = 20;
+      const lh = 16;
+
+      ctx.fillText(`WAVE ${engine.wave.index}`, x, y); y += lh;
+      ctx.fillText(`PHASE: ${phase}`, x, y); y += lh;
+      ctx.fillText(`SPAWNED: ${engine.wave.spawned}/${engine.wave.targetToSpawn}`, x, y); y += lh;
+      ctx.fillText(`KILLED: ${engine.wave.killed}  ALIVE: ${engine.enemies.length}`, x, y); y += lh;
+      ctx.fillText(`AGE: ${waveAgeSec.toFixed(1)}s`, x, y); y += lh;
+      if (phase === 'INTERMISSION') {
+        ctx.fillText(`NEXT IN: ${intermissionLeftSec.toFixed(1)}s`, x, y);
+      }
+      ctx.restore();
+    }
 
     // Faint right joystick base
     const rightJoyX = canvas.width - 150;

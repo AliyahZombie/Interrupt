@@ -14,6 +14,7 @@ export interface GameState {
     stopSpawning: boolean;
     godMode: boolean;
     noCooldowns: boolean;
+    showWaveDebug: boolean;
   };
 }
 
@@ -248,6 +249,12 @@ export class Player {
   dashDy: number = 0;
   dashSpeed: number = 1600;
 
+  shield: number = 0;
+  maxShield: number = 0;
+  shieldRegenDelayMs: number = 3500;
+  shieldRegenPerSecond: number = 60;
+  lastDamagedAtMs: number = -Infinity;
+
   constructor(
     public x: number,
     public y: number,
@@ -256,6 +263,39 @@ export class Player {
     public hp: number,
     public maxHp: number
   ) {}
+
+  configureShield(maxShield: number, regenDelayMs: number, regenPerSecond: number) {
+    this.maxShield = Math.max(0, maxShield);
+    this.shieldRegenDelayMs = Math.max(0, regenDelayMs);
+    this.shieldRegenPerSecond = Math.max(0, regenPerSecond);
+    this.shield = clamp(this.shield, 0, this.maxShield);
+  }
+
+  resetVitals(timeMs: number) {
+    this.hp = this.maxHp;
+    this.shield = this.maxShield;
+    this.lastDamagedAtMs = timeMs;
+  }
+
+  applyDamage(amount: number, timeMs: number) {
+    if (amount <= 0) return;
+    this.lastDamagedAtMs = timeMs;
+
+    const shieldAbsorb = Math.min(this.shield, amount);
+    this.shield -= shieldAbsorb;
+    const remaining = amount - shieldAbsorb;
+    if (remaining > 0) {
+      this.hp = Math.max(0, this.hp - remaining);
+    }
+  }
+
+  updateShield(dt: number, timeMs: number) {
+    if (this.maxShield <= 0) return;
+    if (this.shield >= this.maxShield) return;
+    if (timeMs - this.lastDamagedAtMs < this.shieldRegenDelayMs) return;
+
+    this.shield = Math.min(this.maxShield, this.shield + this.shieldRegenPerSecond * dt);
+  }
 
   update(dt: number, worldWidth: number, worldHeight: number) {
     if (this.isDashing) {
@@ -385,7 +425,7 @@ export class MeleeEnemy extends BaseEnemy {
 
     if (dist < this.radius + state.player.radius) {
       if (!state.player.isDashing && !state.debugFlags.godMode) {
-        state.player.hp -= 50 * dt * state.rules.playerDamageMultiplier;
+        state.player.applyDamage(50 * dt * state.rules.playerDamageMultiplier, state.time);
       }
     }
   }

@@ -20,7 +20,8 @@ export const Game = () => {
   const [debugFlags, setDebugFlags] = useState({
     stopSpawning: false,
     godMode: false,
-    noCooldowns: false
+    noCooldowns: false,
+    showWaveDebug: false,
   });
 
   const debugFlagsRef = useRef(debugFlags);
@@ -65,6 +66,7 @@ export const Game = () => {
     engine.debugFlags.stopSpawning = debugFlagsRef.current.stopSpawning;
     engine.debugFlags.godMode = debugFlagsRef.current.godMode;
     engine.debugFlags.noCooldowns = debugFlagsRef.current.noCooldowns;
+    engine.debugFlags.showWaveDebug = debugFlagsRef.current.showWaveDebug;
 
     // When the engine is recreated (e.g. rotation / resize), reset the UI state
     // so we don't get stuck in PLAYING with a fresh engine that hasn't started.
@@ -175,6 +177,14 @@ export const Game = () => {
                   }
                 }} className="w-5 h-5 accent-cyan-500" />
                 NO COOLDOWNS
+              </label>
+              <label className="flex items-center gap-3 text-white font-mono uppercase text-sm cursor-pointer">
+                <input type="checkbox" checked={debugFlags.showWaveDebug} onChange={(e) => {
+                  const val = e.target.checked;
+                  setDebugFlags(prev => ({...prev, showWaveDebug: val}));
+                  if (engineRef.current) engineRef.current.debugFlags.showWaveDebug = val;
+                }} className="w-5 h-5 accent-cyan-500" />
+                SHOW WAVE DEBUG
               </label>
             </div>
           </div>

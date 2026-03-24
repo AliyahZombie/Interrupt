@@ -3,6 +3,21 @@ import { Skill, DashSkill, BounceSkill } from './Skills';
 import { Renderer } from './Renderer';
 import { Difficulty, DifficultyRules, getDifficultyRules } from './Difficulty';
 
+type WavePhase = 'SPAWNING' | 'WAIT_CLEAR' | 'INTERMISSION';
+
+interface WaveState {
+  index: number;
+  phase: WavePhase;
+  targetToSpawn: number;
+  spawned: number;
+  killed: number;
+  startedAtMs: number;
+  intermissionUntilMs: number;
+  skipNextIntermission: boolean;
+  cancelIntermissionAfterMs: number;
+  forceNextWaveAfterMs: number;
+}
+
 export interface JoystickData {
   active: boolean;
   originX: number;
@@ -35,10 +50,10 @@ export class GameEngine {
   particles: Particle[] = [];
   credits: Credit[] = [];
   tiles: Tile[] = [];
+
   
   lastTime: number = performance.now();
   lastShot: number = 0;
-  lastSpawn: number = 0;
   score: number = 0;
   collectedCredits: number = 0;
   gameStarted: boolean = false;
@@ -50,8 +65,24 @@ export class GameEngine {
   debugFlags = {
     stopSpawning: false,
     godMode: false,
-    noCooldowns: false
+    noCooldowns: false,
+    showWaveDebug: false,
   };
+
+  wave: WaveState = {
+    index: 1,
+    phase: 'SPAWNING',
+    targetToSpawn: 0,
+    spawned: 0,
+    killed: 0,
+    startedAtMs: performance.now(),
+    intermissionUntilMs: 0,
+    skipNextIntermission: false,
+    cancelIntermissionAfterMs: 0,
+    forceNextWaveAfterMs: 0,
+  };
+
+  lastWaveSpawnAtMs: number = 0;
 
   onStateChange?: (state: 'START' | 'PLAYING' | 'GAME_OVER') => void;
   onScoreChange?: (score: number, credits: number) => void;
@@ -80,6 +111,148 @@ export class GameEngine {
   setDifficulty(difficulty: Difficulty) {
     this.difficulty = difficulty;
     this.rules = getDifficultyRules(difficulty);
+    this.configureShieldForDifficulty();
+  }
+
+  private getWaveDifficultyMultiplier() {
+    if (this.difficulty === 'EASY') return 0.85;
+    if (this.difficulty === 'HARD') return 1.25;
+    return 1;
+  }
+
+  private configureShieldForDifficulty() {
+    if (this.difficulty === 'EASY') {
+      this.player.configureShield(200, 2500, 95);
+      return;
+    }
+    if (this.difficulty === 'HARD') {
+      this.player.configureShield(110, 4200, 55);
+      return;
+    }
+    this.player.configureShield(150, 3500, 70);
+  }
+
+  private computeWaveTargetCount(waveIndex: number) {
+    const base = 6;
+    const perWave = 2;
+    const raw = base + (waveIndex - 1) * perWave;
+    const scaled = Math.round(raw * this.getWaveDifficultyMultiplier());
+    return Math.max(1, scaled);
+  }
+
+  private computeWaveSpawnIntervalMs() {
+    const base = 650;
+    const scaled = base / this.getWaveDifficultyMultiplier();
+    return Math.max(320, Math.min(900, Math.round(scaled)));
+  }
+
+  private computeIntermissionMs() {
+    return 2400;
+  }
+
+  private computeCancelIntermissionAfterMs(waveIndex: number) {
+    return 20000 + waveIndex * 800;
+  }
+
+  private computeForceNextWaveAfterMs(waveIndex: number) {
+    return 45000 + waveIndex * 1500;
+  }
+
+  private startWave(timeMs: number, waveIndex: number) {
+    this.wave = {
+      index: waveIndex,
+      phase: 'SPAWNING',
+      targetToSpawn: this.computeWaveTargetCount(waveIndex),
+      spawned: 0,
+      killed: 0,
+      startedAtMs: timeMs,
+      intermissionUntilMs: 0,
+      skipNextIntermission: false,
+      cancelIntermissionAfterMs: this.computeCancelIntermissionAfterMs(waveIndex),
+      forceNextWaveAfterMs: this.computeForceNextWaveAfterMs(waveIndex),
+    };
+    this.lastWaveSpawnAtMs = timeMs;
+  }
+
+  private spawnWaveEnemy(cameraX: number, cameraY: number) {
+    const spawnEdge = Math.floor(Math.random() * 4);
+    let ex = 0;
+    let ey = 0;
+    const margin = 50;
+
+    if (spawnEdge === 0) {
+      ex = cameraX + Math.random() * this.canvas.width;
+      ey = cameraY - margin;
+    } else if (spawnEdge === 1) {
+      ex = cameraX + this.canvas.width + margin;
+      ey = cameraY + Math.random() * this.canvas.height;
+    } else if (spawnEdge === 2) {
+      ex = cameraX + Math.random() * this.canvas.width;
+      ey = cameraY + this.canvas.height + margin;
+    } else {
+      ex = cameraX - margin;
+      ey = cameraY + Math.random() * this.canvas.height;
+    }
+
+    ex = Math.max(0, Math.min(this.world.width, ex));
+    ey = Math.max(0, Math.min(this.world.height, ey));
+
+    const wave = this.wave.index;
+    const waveRangedBase = 0.2 + wave * 0.03;
+    const rangedChance = Math.max(0.2, Math.min(0.6, waveRangedBase + (this.difficulty === 'HARD' ? 0.05 : 0)));
+
+    if (Math.random() < rangedChance) {
+      this.enemies.push(new RangedEnemy(ex, ey));
+    } else {
+      this.enemies.push(new MeleeEnemy(ex, ey));
+    }
+  }
+
+  private updateWaves(timeMs: number, cameraX: number, cameraY: number) {
+    if (this.debugFlags.stopSpawning) return;
+
+    const waveAgeMs = timeMs - this.wave.startedAtMs;
+    const alive = this.enemies.length;
+
+    if (this.wave.phase === 'INTERMISSION') {
+      if (timeMs >= this.wave.intermissionUntilMs) {
+        this.startWave(timeMs, this.wave.index + 1);
+      }
+      return;
+    }
+
+    if (this.wave.phase === 'SPAWNING') {
+      const spawnIntervalMs = this.computeWaveSpawnIntervalMs();
+      const canSpawn = timeMs - this.lastWaveSpawnAtMs >= spawnIntervalMs;
+
+      if (this.wave.spawned < this.wave.targetToSpawn && canSpawn) {
+        this.spawnWaveEnemy(cameraX, cameraY);
+        this.wave.spawned += 1;
+        this.lastWaveSpawnAtMs = timeMs;
+      }
+
+      if (this.wave.spawned >= this.wave.targetToSpawn) {
+        this.wave.phase = 'WAIT_CLEAR';
+      }
+
+      return;
+    }
+
+    if (alive <= 1 && waveAgeMs >= this.wave.cancelIntermissionAfterMs) {
+      this.wave.skipNextIntermission = true;
+    }
+
+    if (waveAgeMs >= this.wave.forceNextWaveAfterMs) {
+      this.enemies = [];
+      this.startWave(timeMs, this.wave.index + 1);
+      return;
+    }
+
+    if (alive === 0) {
+      const delayMs = this.wave.skipNextIntermission ? 0 : this.computeIntermissionMs();
+      this.wave.phase = 'INTERMISSION';
+      this.wave.intermissionUntilMs = timeMs + delayMs;
+    }
   }
 
   destroy() {
@@ -97,7 +270,10 @@ export class GameEngine {
   }
 
   resetGame() {
-    this.player.hp = this.player.maxHp;
+    const now = performance.now();
+
+    this.configureShieldForDifficulty();
+    this.player.resetVitals(now);
     this.player.x = this.world.width / 2;
     this.player.y = this.world.height / 2;
     this.enemies = [];
@@ -109,9 +285,11 @@ export class GameEngine {
     this.score = 0;
     this.collectedCredits = 0;
     this.gameOver = false;
-    this.lastTime = performance.now();
+    this.lastTime = now;
     this.skills.forEach(s => { if (s) s.currentCooldown = 0; });
     this.onScoreChange?.(this.score, this.collectedCredits);
+
+    this.startWave(now, 1);
   }
 
   startGame(difficulty?: Difficulty) {
@@ -236,30 +414,6 @@ export class GameEngine {
     }
   }
 
-  spawnEnemy(cameraX: number, cameraY: number, time: number) {
-    if (this.debugFlags.stopSpawning) return;
-    if (time - this.lastSpawn > 1500) {
-      const spawnEdge = Math.floor(Math.random() * 4);
-      let ex = 0, ey = 0;
-      const margin = 50;
-      
-      if (spawnEdge === 0) { ex = cameraX + Math.random() * this.canvas.width; ey = cameraY - margin; }
-      else if (spawnEdge === 1) { ex = cameraX + this.canvas.width + margin; ey = cameraY + Math.random() * this.canvas.height; }
-      else if (spawnEdge === 2) { ex = cameraX + Math.random() * this.canvas.width; ey = cameraY + this.canvas.height + margin; }
-      else { ex = cameraX - margin; ey = cameraY + Math.random() * this.canvas.height; }
-
-      ex = Math.max(0, Math.min(this.world.width, ex));
-      ey = Math.max(0, Math.min(this.world.height, ey));
-
-      if (Math.random() > 0.6) {
-        this.enemies.push(new RangedEnemy(ex, ey));
-      } else {
-        this.enemies.push(new MeleeEnemy(ex, ey));
-      }
-      this.lastSpawn = time;
-    }
-  }
-
   loop(time: number) {
     const dt = (time - this.lastTime) / 1000;
     this.lastTime = time;
@@ -352,6 +506,7 @@ export class GameEngine {
             }
             if (e.hp <= 0) {
               this.enemies.splice(j, 1);
+              this.wave.killed += 1;
               this.score += (e instanceof MeleeEnemy ? 10 : 20);
               this.onScoreChange?.(this.score, this.collectedCredits);
               // Drop credit (40% chance)
@@ -364,7 +519,7 @@ export class GameEngine {
         }
       } else {
         if (!this.player.isDashing && !this.debugFlags.godMode && Math.hypot(p.x - this.player.x, p.y - this.player.y) < this.player.radius + 5) {
-          this.player.hp -= p.damage * this.rules.playerDamageMultiplier;
+          this.player.applyDamage(p.damage * this.rules.playerDamageMultiplier, time);
           hit = true;
           for(let k=0; k<5; k++) {
             this.particles.push(new Particle(
@@ -384,7 +539,9 @@ export class GameEngine {
     // Enemies
     let cameraX = this.player.x - this.canvas.width / 2;
     let cameraY = this.player.y - this.canvas.height / 2;
-    this.spawnEnemy(cameraX, cameraY, time);
+    this.updateWaves(time, cameraX, cameraY);
+
+    this.player.updateShield(dt, time);
 
     const stateObj: GameState = {
       player: this.player,
