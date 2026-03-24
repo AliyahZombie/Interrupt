@@ -2,21 +2,8 @@ import { Player, Projectile, BaseEnemy, MeleeEnemy, RangedEnemy, Particle, GameS
 import { Skill, DashSkill, BounceSkill } from './Skills';
 import { Renderer } from './Renderer';
 import { Difficulty, DifficultyRules, getDifficultyRules } from './Difficulty';
-
-type WavePhase = 'SPAWNING' | 'WAIT_CLEAR' | 'INTERMISSION';
-
-interface WaveState {
-  index: number;
-  phase: WavePhase;
-  targetToSpawn: number;
-  spawned: number;
-  killed: number;
-  startedAtMs: number;
-  intermissionUntilMs: number;
-  skipNextIntermission: boolean;
-  cancelIntermissionAfterMs: number;
-  forceNextWaveAfterMs: number;
-}
+import { resolveCircleRect, resolveRectRect } from './physics/Collisions';
+import { WaveSystem } from './waves/WaveSystem';
 
 export interface JoystickData {
   active: boolean;
@@ -69,20 +56,11 @@ export class GameEngine {
     showWaveDebug: false,
   };
 
-  wave: WaveState = {
-    index: 1,
-    phase: 'SPAWNING',
-    targetToSpawn: 0,
-    spawned: 0,
-    killed: 0,
-    startedAtMs: performance.now(),
-    intermissionUntilMs: 0,
-    skipNextIntermission: false,
-    cancelIntermissionAfterMs: 0,
-    forceNextWaveAfterMs: 0,
-  };
+  waveSystem: WaveSystem;
 
-  lastWaveSpawnAtMs: number = 0;
+  get wave() {
+    return this.waveSystem.state;
+  }
 
   onStateChange?: (state: 'START' | 'PLAYING' | 'GAME_OVER') => void;
   onScoreChange?: (score: number, credits: number) => void;
@@ -91,6 +69,7 @@ export class GameEngine {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.renderer = new Renderer(this.canvas, this.ctx);
+    this.waveSystem = new WaveSystem(performance.now(), this.difficulty);
     
     this.handleResize = this.handleResize.bind(this);
     this.handlePointerDown = this.handlePointerDown.bind(this);
@@ -112,12 +91,7 @@ export class GameEngine {
     this.difficulty = difficulty;
     this.rules = getDifficultyRules(difficulty);
     this.configureShieldForDifficulty();
-  }
-
-  private getWaveDifficultyMultiplier() {
-    if (this.difficulty === 'EASY') return 0.85;
-    if (this.difficulty === 'HARD') return 1.25;
-    return 1;
+    this.waveSystem.setDifficulty(difficulty);
   }
 
   private configureShieldForDifficulty() {
@@ -130,129 +104,6 @@ export class GameEngine {
       return;
     }
     this.player.configureShield(150, 3500, 70);
-  }
-
-  private computeWaveTargetCount(waveIndex: number) {
-    const base = 6;
-    const perWave = 2;
-    const raw = base + (waveIndex - 1) * perWave;
-    const scaled = Math.round(raw * this.getWaveDifficultyMultiplier());
-    return Math.max(1, scaled);
-  }
-
-  private computeWaveSpawnIntervalMs() {
-    const base = 650;
-    const scaled = base / this.getWaveDifficultyMultiplier();
-    return Math.max(320, Math.min(900, Math.round(scaled)));
-  }
-
-  private computeIntermissionMs() {
-    return 2400;
-  }
-
-  private computeCancelIntermissionAfterMs(waveIndex: number) {
-    return 20000 + waveIndex * 800;
-  }
-
-  private computeForceNextWaveAfterMs(waveIndex: number) {
-    return 45000 + waveIndex * 1500;
-  }
-
-  private startWave(timeMs: number, waveIndex: number) {
-    this.wave = {
-      index: waveIndex,
-      phase: 'SPAWNING',
-      targetToSpawn: this.computeWaveTargetCount(waveIndex),
-      spawned: 0,
-      killed: 0,
-      startedAtMs: timeMs,
-      intermissionUntilMs: 0,
-      skipNextIntermission: false,
-      cancelIntermissionAfterMs: this.computeCancelIntermissionAfterMs(waveIndex),
-      forceNextWaveAfterMs: this.computeForceNextWaveAfterMs(waveIndex),
-    };
-    this.lastWaveSpawnAtMs = timeMs;
-  }
-
-  private spawnWaveEnemy(cameraX: number, cameraY: number) {
-    const spawnEdge = Math.floor(Math.random() * 4);
-    let ex = 0;
-    let ey = 0;
-    const margin = 50;
-
-    if (spawnEdge === 0) {
-      ex = cameraX + Math.random() * this.canvas.width;
-      ey = cameraY - margin;
-    } else if (spawnEdge === 1) {
-      ex = cameraX + this.canvas.width + margin;
-      ey = cameraY + Math.random() * this.canvas.height;
-    } else if (spawnEdge === 2) {
-      ex = cameraX + Math.random() * this.canvas.width;
-      ey = cameraY + this.canvas.height + margin;
-    } else {
-      ex = cameraX - margin;
-      ey = cameraY + Math.random() * this.canvas.height;
-    }
-
-    ex = Math.max(0, Math.min(this.world.width, ex));
-    ey = Math.max(0, Math.min(this.world.height, ey));
-
-    const wave = this.wave.index;
-    const waveRangedBase = 0.2 + wave * 0.03;
-    const rangedChance = Math.max(0.2, Math.min(0.6, waveRangedBase + (this.difficulty === 'HARD' ? 0.05 : 0)));
-
-    if (Math.random() < rangedChance) {
-      this.enemies.push(new RangedEnemy(ex, ey));
-    } else {
-      this.enemies.push(new MeleeEnemy(ex, ey));
-    }
-  }
-
-  private updateWaves(timeMs: number, cameraX: number, cameraY: number) {
-    if (this.debugFlags.stopSpawning) return;
-
-    const waveAgeMs = timeMs - this.wave.startedAtMs;
-    const alive = this.enemies.length;
-
-    if (this.wave.phase === 'INTERMISSION') {
-      if (timeMs >= this.wave.intermissionUntilMs) {
-        this.startWave(timeMs, this.wave.index + 1);
-      }
-      return;
-    }
-
-    if (this.wave.phase === 'SPAWNING') {
-      const spawnIntervalMs = this.computeWaveSpawnIntervalMs();
-      const canSpawn = timeMs - this.lastWaveSpawnAtMs >= spawnIntervalMs;
-
-      if (this.wave.spawned < this.wave.targetToSpawn && canSpawn) {
-        this.spawnWaveEnemy(cameraX, cameraY);
-        this.wave.spawned += 1;
-        this.lastWaveSpawnAtMs = timeMs;
-      }
-
-      if (this.wave.spawned >= this.wave.targetToSpawn) {
-        this.wave.phase = 'WAIT_CLEAR';
-      }
-
-      return;
-    }
-
-    if (alive <= 1 && waveAgeMs >= this.wave.cancelIntermissionAfterMs) {
-      this.wave.skipNextIntermission = true;
-    }
-
-    if (waveAgeMs >= this.wave.forceNextWaveAfterMs) {
-      this.enemies = [];
-      this.startWave(timeMs, this.wave.index + 1);
-      return;
-    }
-
-    if (alive === 0) {
-      const delayMs = this.wave.skipNextIntermission ? 0 : this.computeIntermissionMs();
-      this.wave.phase = 'INTERMISSION';
-      this.wave.intermissionUntilMs = timeMs + delayMs;
-    }
   }
 
   destroy() {
@@ -289,7 +140,7 @@ export class GameEngine {
     this.skills.forEach(s => { if (s) s.currentCooldown = 0; });
     this.onScoreChange?.(this.score, this.collectedCredits);
 
-    this.startWave(now, 1);
+    this.waveSystem.reset(now, this.difficulty);
   }
 
   startGame(difficulty?: Difficulty) {
@@ -506,7 +357,7 @@ export class GameEngine {
             }
             if (e.hp <= 0) {
               this.enemies.splice(j, 1);
-              this.wave.killed += 1;
+              this.waveSystem.onEnemyKilled(1);
               this.score += (e instanceof MeleeEnemy ? 10 : 20);
               this.onScoreChange?.(this.score, this.collectedCredits);
               // Drop credit (40% chance)
@@ -539,7 +390,31 @@ export class GameEngine {
     // Enemies
     let cameraX = this.player.x - this.canvas.width / 2;
     let cameraY = this.player.y - this.canvas.height / 2;
-    this.updateWaves(time, cameraX, cameraY);
+
+    const waveOut = this.waveSystem.update({
+      timeMs: time,
+      difficulty: this.difficulty,
+      stopSpawning: this.debugFlags.stopSpawning,
+      enemiesAlive: this.enemies.length,
+      cameraX,
+      cameraY,
+      viewportWidth: this.canvas.width,
+      viewportHeight: this.canvas.height,
+      worldWidth: this.world.width,
+      worldHeight: this.world.height,
+    });
+
+    if (waveOut.clearEnemies) {
+      this.enemies = [];
+    }
+
+    for (const s of waveOut.spawns) {
+      if (s.kind === 'RANGED') {
+        this.enemies.push(new RangedEnemy(s.x, s.y));
+      } else {
+        this.enemies.push(new MeleeEnemy(s.x, s.y));
+      }
+    }
 
     this.player.updateShield(dt, time);
 
@@ -597,122 +472,6 @@ export class GameEngine {
         this.particles.splice(i, 1);
       }
     }
-
-    // --- TILE COLLISIONS ---
-    const resolveRectRect = (rect1: Tile, rect2: Tile) => {
-      const dx = rect1.x - rect2.x;
-      const dy = rect1.y - rect2.y;
-      const combinedHalfWidths = (rect1.width + rect2.width) / 2;
-      const combinedHalfHeights = (rect1.height + rect2.height) / 2;
-
-      if (Math.abs(dx) < combinedHalfWidths && Math.abs(dy) < combinedHalfHeights) {
-        const overlapX = combinedHalfWidths - Math.abs(dx);
-        const overlapY = combinedHalfHeights - Math.abs(dy);
-
-        let nx = 0, ny = 0, overlap = 0;
-        if (overlapX < overlapY) {
-          nx = Math.sign(dx) || 1;
-          ny = 0;
-          overlap = overlapX;
-        } else {
-          nx = 0;
-          ny = Math.sign(dy) || 1;
-          overlap = overlapY;
-        }
-
-        if (rect1.isFixed && rect2.isFixed) {
-          return;
-        } else if (rect1.isFixed) {
-          rect2.x -= nx * overlap;
-          rect2.y -= ny * overlap;
-          if (nx !== 0) rect2.vx *= -0.5;
-          if (ny !== 0) rect2.vy *= -0.5;
-        } else if (rect2.isFixed) {
-          rect1.x += nx * overlap;
-          rect1.y += ny * overlap;
-          if (nx !== 0) rect1.vx *= -0.5;
-          if (ny !== 0) rect1.vy *= -0.5;
-        } else {
-          const totalMass = rect1.mass + rect2.mass;
-          const r1Ratio = rect2.mass / totalMass;
-          const r2Ratio = rect1.mass / totalMass;
-          
-          rect1.x += nx * overlap * r1Ratio;
-          rect1.y += ny * overlap * r1Ratio;
-          rect2.x -= nx * overlap * r2Ratio;
-          rect2.y -= ny * overlap * r2Ratio;
-          
-          const v1n = rect1.vx * nx + rect1.vy * ny;
-          const v2n = rect2.vx * nx + rect2.vy * ny;
-          const dv = v1n - v2n;
-          
-          if (dv < 0) {
-            const restitution = 0.4;
-            const impulse = -(1 + restitution) * dv / (1/rect1.mass + 1/rect2.mass);
-            rect1.vx += nx * impulse / rect1.mass;
-            rect1.vy += ny * impulse / rect1.mass;
-            rect2.vx -= nx * impulse / rect2.mass;
-            rect2.vy -= ny * impulse / rect2.mass;
-          }
-        }
-      }
-    };
-
-    const resolveCircleRect = (circle: any, rect: Tile, isProjectile: boolean = false) => {
-      const radius = circle.radius ?? 5; // Fallback for projectiles
-      const dx = circle.x - rect.x;
-      const dy = circle.y - rect.y;
-      const px = Math.max(-rect.width / 2, Math.min(rect.width / 2, dx));
-      const py = Math.max(-rect.height / 2, Math.min(rect.height / 2, dy));
-      
-      const dist = Math.hypot(dx - px, dy - py);
-      if (dist < radius) {
-        let nx = dx - px;
-        let ny = dy - py;
-        let len = Math.hypot(nx, ny);
-        let overlap = radius - dist;
-        
-        if (len === 0) {
-          if (Math.abs(dx) > Math.abs(dy)) {
-            nx = Math.sign(dx) || 1; ny = 0;
-            overlap = radius + rect.width / 2 - Math.abs(dx);
-          } else {
-            nx = 0; ny = Math.sign(dy) || 1;
-            overlap = radius + rect.height / 2 - Math.abs(dy);
-          }
-        } else {
-          nx /= len;
-          ny /= len;
-        }
-        
-        if (rect.isFixed) {
-          if (!isProjectile) {
-            circle.x += nx * overlap;
-            circle.y += ny * overlap;
-          }
-        } else {
-          if (!isProjectile) {
-            const pushFactor = 0.8; // Circle gets pushed more, tile gets pushed less
-            circle.x += nx * overlap * pushFactor;
-            circle.y += ny * overlap * pushFactor;
-            rect.x -= nx * overlap * (1 - pushFactor);
-            rect.y -= ny * overlap * (1 - pushFactor);
-            
-            // Give it a velocity kick so it slides
-            rect.vx -= nx * overlap * 60;
-            rect.vy -= ny * overlap * 60;
-          } else {
-            // Projectile hits movable tile
-            if (circle.vx !== undefined && circle.vy !== undefined) {
-              rect.vx += circle.vx * 0.15;
-              rect.vy += circle.vy * 0.15;
-            }
-          }
-        }
-        return true;
-      }
-      return false;
-    };
 
     // Update tiles
     for (const tile of this.tiles) {

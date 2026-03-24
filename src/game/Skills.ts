@@ -1,4 +1,4 @@
-import { GameEngine } from './Engine';
+import type { GameEngine } from './Engine';
 import { Particle } from './Entities';
 
 export abstract class Skill {

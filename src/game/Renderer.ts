@@ -1,5 +1,4 @@
-import { GameEngine, JoystickData } from './Engine';
-import { MeleeEnemy } from './Entities';
+import type { GameEngine, JoystickData } from './Engine';
 
 export class Renderer {
   constructor(public canvas: HTMLCanvasElement, public ctx: CanvasRenderingContext2D) {}
@@ -320,11 +319,12 @@ export class Renderer {
     ctx.fillText(`CREDITS: ${engine.collectedCredits}`, 20, 70);
 
     if (engine.debugFlags.showWaveDebug) {
+      const wave = engine.waveSystem.state;
       const now = performance.now();
-      const waveAgeSec = Math.max(0, (now - engine.wave.startedAtMs) / 1000);
-      const phase = engine.wave.phase;
+      const waveAgeSec = Math.max(0, (now - wave.startedAtMs) / 1000);
+      const phase = wave.phase;
       const intermissionLeftSec = phase === 'INTERMISSION'
-        ? Math.max(0, (engine.wave.intermissionUntilMs - now) / 1000)
+        ? Math.max(0, (wave.intermissionUntilMs - now) / 1000)
         : 0;
 
       ctx.save();
@@ -336,10 +336,10 @@ export class Renderer {
       let y = 20;
       const lh = 16;
 
-      ctx.fillText(`WAVE ${engine.wave.index}`, x, y); y += lh;
+      ctx.fillText(`WAVE ${wave.index}`, x, y); y += lh;
       ctx.fillText(`PHASE: ${phase}`, x, y); y += lh;
-      ctx.fillText(`SPAWNED: ${engine.wave.spawned}/${engine.wave.targetToSpawn}`, x, y); y += lh;
-      ctx.fillText(`KILLED: ${engine.wave.killed}  ALIVE: ${engine.enemies.length}`, x, y); y += lh;
+      ctx.fillText(`SPAWNED: ${wave.spawned}/${wave.targetToSpawn}`, x, y); y += lh;
+      ctx.fillText(`KILLED: ${wave.killed}  ALIVE: ${engine.enemies.length}`, x, y); y += lh;
       ctx.fillText(`AGE: ${waveAgeSec.toFixed(1)}s`, x, y); y += lh;
       if (phase === 'INTERMISSION') {
         ctx.fillText(`NEXT IN: ${intermissionLeftSec.toFixed(1)}s`, x, y);
