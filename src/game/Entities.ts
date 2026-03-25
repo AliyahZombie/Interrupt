@@ -1,5 +1,8 @@
 import type { Difficulty, DifficultyRules } from './Difficulty';
 import { getPortalSvgDataUrl } from './assets/portalSvg';
+import { EffectManager } from './effects/EffectManager';
+import { createPoisonEffect, createStunEffect } from './effects/effects';
+import type { EffectKind } from './effects/types';
 
 export interface GameState {
   player: Player;
@@ -436,7 +439,10 @@ export class Player {
   dashDy: number = 0;
   dashSpeed: number = 1600;
 
-  private effects = new Map<EffectKind, ActiveEffect>();
+  private effectManager = new EffectManager({
+    STUN: createStunEffect,
+    POISON: createPoisonEffect,
+  });
 
   shield: number = 0;
   maxShield: number = 0;
@@ -464,7 +470,7 @@ export class Player {
     this.hp = this.maxHp;
     this.shield = this.maxShield;
     this.lastDamagedAtMs = timeMs;
-    this.effects.clear();
+    this.effectManager.clear();
   }
 
   applyDamage(amount: number, timeMs: number) {
@@ -488,50 +494,20 @@ export class Player {
   }
 
   applyEffect(kind: EffectKind, durationMs: number, timeMs: number) {
-    const dur = Math.max(0, durationMs);
-    if (dur <= 0) return;
-    const existing = this.effects.get(kind);
-    if (!existing) {
-      this.effects.set(kind, { kind, remainingMs: dur, startedAtMs: timeMs });
-      return;
-    }
-    existing.remainingMs = Math.max(existing.remainingMs, dur);
+    void timeMs;
+    this.effectManager.applyEffect(kind, durationMs);
   }
 
   hasEffect(kind: EffectKind): boolean {
-    const e = this.effects.get(kind);
-    return !!e && e.remainingMs > 0;
+    return this.effectManager.has(kind);
   }
 
   getEffectRemainingMs(kind: EffectKind): number {
-    const e = this.effects.get(kind);
-    return e ? Math.max(0, e.remainingMs) : 0;
+    return this.effectManager.getRemainingMs(kind);
   }
 
   updateEffects(dt: number, timeMs: number) {
-    if (this.effects.size === 0) return;
-
-    const dtMs = dt * 1000;
-    for (const e of this.effects.values()) {
-      e.remainingMs -= dtMs;
-    }
-
-    const poison = this.effects.get('POISON');
-    if (poison && poison.remainingMs > 0) {
-      const dps = 18;
-      const next = this.hp - dps * dt;
-      const clamped = Math.max(1, next);
-      if (clamped < this.hp) {
-        this.hp = clamped;
-        this.lastDamagedAtMs = timeMs;
-      }
-    }
-
-    for (const [kind, e] of this.effects) {
-      if (e.remainingMs <= 0) {
-        this.effects.delete(kind);
-      }
-    }
+    this.effectManager.update({ dt, timeMs }, this);
   }
 
   isStunned(): boolean {
@@ -566,13 +542,7 @@ export class Player {
   }
 }
 
-export type EffectKind = 'STUN' | 'POISON';
-
-type ActiveEffect = {
-  kind: EffectKind;
-  remainingMs: number;
-  startedAtMs: number;
-};
+export type { EffectKind };
 
 export abstract class BaseEnemy {
   constructor(

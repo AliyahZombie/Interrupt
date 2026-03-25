@@ -1,0 +1,25 @@
+import type { Effect } from './Effect';
+
+export function createStunEffect(durationMs: number): Effect {
+  return {
+    kind: 'STUN',
+    remainingMs: durationMs,
+    apply: () => {},
+  };
+}
+
+export function createPoisonEffect(durationMs: number): Effect {
+  const dps = 18;
+  return {
+    kind: 'POISON',
+    remainingMs: durationMs,
+    apply: (entity, ctx) => {
+      const next = entity.hp - dps * ctx.dt;
+      const clamped = Math.max(1, next);
+      if (clamped < entity.hp) {
+        entity.hp = clamped;
+        entity.lastDamagedAtMs = ctx.timeMs;
+      }
+    },
+  };
+}
