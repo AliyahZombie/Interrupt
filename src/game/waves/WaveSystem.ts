@@ -42,6 +42,7 @@ export interface WaveUpdateInput {
 export interface WaveUpdateOutput {
   spawns: SpawnRequest[];
   clearEnemies: boolean;
+  forcedAdvance: boolean;
 }
 
 export class WaveSystem {
@@ -78,9 +79,13 @@ export class WaveSystem {
     this.state.killed += Math.max(0, count);
   }
 
+  skipCurrentWave(timeMs: number) {
+    this.startWave(timeMs, this.state.index + 1);
+  }
+
   update(input: WaveUpdateInput): WaveUpdateOutput {
     this.setDifficulty(input.difficulty);
-    if (input.stopSpawning) return { spawns: [], clearEnemies: false };
+    if (input.stopSpawning) return { spawns: [], clearEnemies: false, forcedAdvance: false };
 
     const rng = input.rng ?? Math.random;
     const spawns: SpawnRequest[] = [];
@@ -90,7 +95,7 @@ export class WaveSystem {
       if (input.timeMs >= this.state.intermissionUntilMs) {
         this.startWave(input.timeMs, this.state.index + 1);
       }
-      return { spawns, clearEnemies: false };
+      return { spawns, clearEnemies: false, forcedAdvance: false };
     }
 
     if (this.state.phase === 'SPAWNING') {
@@ -108,7 +113,7 @@ export class WaveSystem {
         this.state.phase = 'WAIT_CLEAR';
       }
 
-      return { spawns, clearEnemies: false };
+      return { spawns, clearEnemies: false, forcedAdvance: false };
     }
 
     if (input.enemiesAlive <= 1 && waveAgeMs >= this.state.cancelIntermissionAfterMs) {
@@ -117,7 +122,7 @@ export class WaveSystem {
 
     if (waveAgeMs >= this.state.forceNextWaveAfterMs) {
       this.startWave(input.timeMs, this.state.index + 1);
-      return { spawns, clearEnemies: true };
+      return { spawns, clearEnemies: false, forcedAdvance: true };
     }
 
     if (input.enemiesAlive === 0) {
@@ -126,7 +131,7 @@ export class WaveSystem {
       this.state.intermissionUntilMs = input.timeMs + delayMs;
     }
 
-    return { spawns, clearEnemies: false };
+    return { spawns, clearEnemies: false, forcedAdvance: false };
   }
 
   private getWaveDifficultyMultiplier() {

@@ -552,6 +552,7 @@ export abstract class BaseEnemy {
     public speed: number,
     public hp: number,
     public maxHp: number,
+    public level: number,
     public color: string
   ) {}
 
@@ -573,6 +574,21 @@ export abstract class BaseEnemy {
     ctx.fillRect(this.x - cameraX - 15, this.y - cameraY - 25, 30, 4);
     ctx.fillStyle = '#22c55e';
     ctx.fillRect(this.x - cameraX - 15, this.y - cameraY - 25, 30 * hpPercent, 4);
+
+    const sx = this.x - cameraX;
+    const sy = this.y - cameraY;
+    ctx.save();
+    ctx.font = 'bold 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const labelY = sy - this.radius - 10;
+    const text = `LV${this.level}`;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.strokeText(text, sx, labelY);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillText(text, sx, labelY);
+    ctx.restore();
   }
 }
 
@@ -581,8 +597,14 @@ export class MeleeEnemy extends BaseEnemy {
   vx: number = 0;
   vy: number = 0;
 
-  constructor(x: number, y: number) {
-    super(x, y, 18, 120 + Math.random() * 50, 300, 300, '#ef4444');
+  constructor(x: number, y: number, level: number = 1) {
+    const lv = Math.max(1, Math.floor(level));
+    const baseSpeed = 120 + Math.random() * 50;
+    const baseHp = 300;
+    const hpScale = 1 + 0.35 * (lv - 1);
+    const speedScale = 1 + 0.06 * (lv - 1);
+    const maxHp = baseHp * hpScale;
+    super(x, y, 18, baseSpeed * speedScale, maxHp, maxHp, lv, '#ef4444');
   }
 
   update(dt: number, state: GameState) {
@@ -652,10 +674,19 @@ export class MeleeEnemy extends BaseEnemy {
 
 export class RangedEnemy extends BaseEnemy {
   lastShot: number = 0;
+  fireIntervalMs: number;
   orbitDirection: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
 
-  constructor(x: number, y: number) {
-    super(x, y, 15, 80 + Math.random() * 40, 100, 100, '#a855f7');
+  constructor(x: number, y: number, level: number = 1) {
+    const lv = Math.max(1, Math.floor(level));
+    const baseSpeed = 80 + Math.random() * 40;
+    const baseHp = 100;
+    const hpScale = 1 + 0.3 * (lv - 1);
+    const speedScale = 1 + 0.05 * (lv - 1);
+    const maxHp = baseHp * hpScale;
+    super(x, y, 15, baseSpeed * speedScale, maxHp, maxHp, lv, '#a855f7');
+    const rawInterval = 2000 / (1 + 0.14 * (lv - 1));
+    this.fireIntervalMs = clamp(rawInterval, 650, 2000);
   }
 
   update(dt: number, state: GameState) {
@@ -699,7 +730,7 @@ export class RangedEnemy extends BaseEnemy {
     this.x += move.x * this.speed * dt;
     this.y += move.y * this.speed * dt;
 
-    if (state.time - this.lastShot > 2000) {
+    if (state.time - this.lastShot > this.fireIntervalMs) {
       state.projectiles.push(new Bullet(
         this.x, this.y,
         Math.cos(angle) * 400, Math.sin(angle) * 400,

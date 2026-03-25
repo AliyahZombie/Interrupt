@@ -18,6 +18,7 @@ export const Game = () => {
   const [credits, setCredits] = useState(0);
   const [showUIPreview, setShowUIPreview] = useState(false);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
+  const [spawnLevelText, setSpawnLevelText] = useState('1');
   const [debugFlags, setDebugFlags] = useState({
     stopSpawning: false,
     godMode: false,
@@ -125,28 +126,39 @@ export const Game = () => {
         variant="cyan"
         actions={<CyberButton variant="ghost" onClick={() => setIsDebugPanelOpen(false)}>CLOSE</CyberButton>}
       >
-        <div className="space-y-6">
-            <div className="flex flex-col gap-3">
-              <CyberText variant="label" color="cyan">ACTIONS</CyberText>
-              <div className="grid grid-cols-2 gap-2">
-              <CyberButton variant="danger" onClick={() => {
-                if (engineRef.current) engineRef.current.enemies = [];
-              }}>CLEAR ENEMIES</CyberButton>
-              <CyberButton variant="primary" onClick={() => {
-                if (engineRef.current) {
-                  const { player } = engineRef.current;
-                  engineRef.current.enemies.push(new RangedEnemy(player.x + 200, player.y));
-                }
-              }}>SPAWN RANGED</CyberButton>
-               <CyberButton variant="primary" onClick={() => {
-                 if (engineRef.current) {
-                   const { player } = engineRef.current;
-                   engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y));
-                 }
-               }}>SPAWN MELEE</CyberButton>
-               <CyberButton variant="primary" onClick={() => {
-                 engineRef.current?.applyPlayerEffect('STUN', 3000);
-               }}>STUN 3S</CyberButton>
+          <div className="space-y-6">
+              <div className="flex flex-col gap-3">
+                <CyberText variant="label" color="cyan">ACTIONS</CyberText>
+                <CyberInput
+                  label="SPAWN LEVEL"
+                  value={spawnLevelText}
+                  onChange={(e) => setSpawnLevelText(e.target.value)}
+                  placeholder="1"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                <CyberButton variant="danger" onClick={() => {
+                  if (engineRef.current) engineRef.current.enemies = [];
+                }}>CLEAR ENEMIES</CyberButton>
+                <CyberButton variant="danger" onClick={() => {
+                  engineRef.current?.skipCurrentWave();
+                }}>SKIP WAVE</CyberButton>
+                <CyberButton variant="primary" onClick={() => {
+                  if (engineRef.current) {
+                    const { player } = engineRef.current;
+                    const level = Math.max(1, Math.floor(Number.parseInt(spawnLevelText, 10) || 1));
+                    engineRef.current.enemies.push(new RangedEnemy(player.x + 200, player.y, level));
+                  }
+                }}>SPAWN RANGED</CyberButton>
+                 <CyberButton variant="primary" onClick={() => {
+                   if (engineRef.current) {
+                     const { player } = engineRef.current;
+                     const level = Math.max(1, Math.floor(Number.parseInt(spawnLevelText, 10) || 1));
+                     engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y, level));
+                   }
+                 }}>SPAWN MELEE</CyberButton>
+                 <CyberButton variant="primary" onClick={() => {
+                   engineRef.current?.applyPlayerEffect('STUN', 3000);
+                 }}>STUN 3S</CyberButton>
                <CyberButton variant="primary" onClick={() => {
                  engineRef.current?.applyPlayerEffect('POISON', 8000);
                }}>POISON 8S</CyberButton>

@@ -59,6 +59,15 @@ export class GameEngine {
     this.player.applyEffect(kind, durationMs, now);
   }
 
+  skipCurrentWave() {
+    const now = performance.now();
+    const stage = this.dungeon.getStage();
+    if (stage === 'COMBAT' && !this.isCombatRoomFinished()) {
+      this.combatWavesCleared = Math.min(this.combatWaveTarget, this.combatWavesCleared + 1);
+    }
+    this.waveSystem.skipCurrentWave(now);
+  }
+
   enemies: BaseEnemy[] = [];
   particles: Particle[] = [];
   credits: Credit[] = [];
@@ -432,22 +441,23 @@ export class GameEngine {
     });
 
     if (stage === 'COMBAT') {
-      if (waveOut.clearEnemies) {
-        this.combatWavesCleared += 1;
+      if (waveOut.forcedAdvance) {
+        this.combatWavesCleared = Math.min(this.combatWaveTarget, this.combatWavesCleared + 1);
       } else if (prevPhase === 'WAIT_CLEAR' && this.waveSystem.state.phase === 'INTERMISSION') {
         this.combatWavesCleared += 1;
       }
     }
 
-    if (waveOut.clearEnemies) {
-      this.enemies = [];
-    }
-
     for (const s of waveOut.spawns) {
+      const enemyLevel = this.computeSpawnEnemyLevel({
+        worldIndex: this.dungeon.getWorldIndex(),
+        waveIndex: this.waveSystem.state.index,
+        rng: Math.random,
+      });
       if (s.kind === 'RANGED') {
-        this.enemies.push(new RangedEnemy(s.x, s.y));
+        this.enemies.push(new RangedEnemy(s.x, s.y, enemyLevel));
       } else {
-        this.enemies.push(new MeleeEnemy(s.x, s.y));
+        this.enemies.push(new MeleeEnemy(s.x, s.y, enemyLevel));
       }
     }
 
@@ -762,6 +772,31 @@ export class GameEngine {
     if (this.combatWaveTarget <= 0) return false;
     if (this.combatWavesCleared < this.combatWaveTarget) return false;
     return this.enemies.length === 0;
+  }
+
+  private computeSpawnEnemyLevel(params: {
+    worldIndex: number;
+    waveIndex: number;
+    rng: () => number;
+  }): number {
+    const worldIndex = Math.max(0, Math.floor(params.worldIndex));
+    const waveIndex = Math.max(1, Math.floor(params.waveIndex));
+
+    if (worldIndex <= 0) return 1;
+
+    const maxLevel = Math.min(1 + worldIndex, 8);
+    const rawChance = 0.08 + worldIndex * 0.05 + (waveIndex - 1) * 0.01;
+    const stepChance = Math.max(0, Math.min(0.4, rawChance));
+
+    let level = 1;
+    for (let next = 2; next <= maxLevel; next++) {
+      if (params.rng() < stepChance) {
+        level = next;
+      } else {
+        break;
+      }
+    }
+    return level;
   }
 
   private updateVisitedRooms(playerX: number, playerY: number) {
