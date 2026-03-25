@@ -1,4 +1,5 @@
 import { Player, Bullet, BaseEnemy, MeleeEnemy, RangedEnemy, Particle, GameState, Credit, Tile, HealthPickup, Portal } from './Entities';
+import type { EffectKind } from './Entities';
 import { Skill, DashSkill, BounceSkill } from './Skills';
 import { Renderer } from './Renderer';
 import { Difficulty, DifficultyRules, getDifficultyRules } from './Difficulty';
@@ -9,6 +10,7 @@ import type { Weapon } from './combat/Weapon';
 import { DefaultWeapon } from './combat/DefaultWeapon';
 import { DungeonManager, createDefaultWorldSizing } from './world';
 import type { DungeonNavigationPath } from './world/DungeonManager';
+import type { DungeonStage } from './world/DungeonManager';
 import type { Rect, WorldLayout } from './world/types';
 
 export interface JoystickData {
@@ -52,6 +54,11 @@ export class GameEngine {
     this.bulletManager.spawn(bullet);
   }
 
+  applyPlayerEffect(kind: EffectKind, durationMs: number) {
+    const now = performance.now();
+    this.player.applyEffect(kind, durationMs, now);
+  }
+
   enemies: BaseEnemy[] = [];
   particles: Particle[] = [];
   credits: Credit[] = [];
@@ -66,6 +73,8 @@ export class GameEngine {
 
   private combatWaveTarget: number = 0;
   private combatWavesCleared: number = 0;
+
+  private visitedRoomIndices = new Set<number>();
 
   
   lastTime: number = performance.now();
@@ -174,6 +183,7 @@ export class GameEngine {
     this.doorToPortal = null;
     this.combatWaveTarget = 0;
     this.combatWavesCleared = 0;
+    this.visitedRoomIndices.clear();
     
     this.score = 0;
     this.collectedCredits = 0;
@@ -207,6 +217,10 @@ export class GameEngine {
   handlePointerDown(e: PointerEvent) {
     e.preventDefault();
     if (!this.gameStarted || this.gameOver) {
+      return;
+    }
+
+    if (this.player.isStunned()) {
       return;
     }
 
@@ -332,8 +346,16 @@ export class GameEngine {
       if (skill) skill.update(dt);
     });
 
+    this.player.updateEffects(dt, time);
+
+    const stunned = this.player.isStunned();
+    if (stunned) {
+      this.player.isDashing = false;
+      this.player.dashTimeRemaining = 0;
+    }
+
     // Player movement
-    if (this.player.isDashing) {
+    if (!stunned && this.player.isDashing) {
       this.updateDashWithCollisions(dt);
       // Visual effect: Particles along the dash path
       this.particles.push(new Particle(
@@ -341,7 +363,7 @@ export class GameEngine {
         (Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50, 
         0, 300, '#3b82f6'
       ));
-    } else if (this.leftJoystick.active) {
+    } else if (!stunned && this.leftJoystick.active) {
       const dx = this.leftJoystick.x - this.leftJoystick.originX;
       const dy = this.leftJoystick.y - this.leftJoystick.originY;
       const distance = Math.hypot(dx, dy);
@@ -358,7 +380,7 @@ export class GameEngine {
     }
 
     // Shooting
-    if (this.rightJoystick.active) {
+    if (!stunned && this.rightJoystick.active) {
       const dx = this.rightJoystick.x - this.rightJoystick.originX;
       const dy = this.rightJoystick.y - this.rightJoystick.originY;
 
@@ -558,6 +580,8 @@ export class GameEngine {
     this.dungeon.updateStage(this.player.x, this.player.y);
     this.navigationPath = this.dungeon.getNavigationPath(this.player.x, this.player.y);
 
+    this.updateVisitedRooms(this.player.x, this.player.y);
+
     if (this.dungeon.getStage() === 'PORTAL' && portalTouched) {
       this.advanceWorld(time);
     }
@@ -602,7 +626,58 @@ export class GameEngine {
 
     this.combatWaveTarget = Math.max(1, this.layout.combatWaveCount);
     this.combatWavesCleared = 0;
+
+    this.visitedRoomIndices.clear();
+    this.updateVisitedRooms(this.player.x, this.player.y);
     this.waveSystem.reset(nowMs, this.difficulty);
+  }
+
+  getMinimapData(): {
+    bounds: { width: number; height: number };
+    rooms: WorldLayout['rooms'];
+    corridors: WorldLayout['corridors'];
+    visitedRoomIndices: ReadonlySet<number>;
+    player: { x: number; y: number };
+    objectivePos: { x: number; y: number } | null;
+    objectiveStage: DungeonStage;
+  } {
+    const stage = this.dungeon.getStage();
+    const combatCleared = this.dungeon.isCombatCleared();
+    const healCollected = this.dungeon.isHealCollected();
+
+    const reward = this.dungeon.getRewardRect();
+    const portal = this.dungeon.getPortalRect();
+
+    const rewardCenter = { x: reward.x + reward.width / 2, y: reward.y + reward.height / 2 };
+    const portalCenter = { x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 };
+
+    let objectiveStage: DungeonStage = stage;
+    let objectivePos: { x: number; y: number } | null = null;
+
+    if (stage === 'COMBAT') {
+      objectiveStage = combatCleared ? 'REWARD' : 'COMBAT';
+      objectivePos = combatCleared ? rewardCenter : null;
+    } else if (stage === 'REWARD') {
+      objectiveStage = healCollected ? 'PORTAL' : 'REWARD';
+      if (healCollected) {
+        objectivePos = this.portals[0] ? { x: this.portals[0].x, y: this.portals[0].y } : portalCenter;
+      } else {
+        objectivePos = this.healthPickups[0] ? { x: this.healthPickups[0].x, y: this.healthPickups[0].y } : rewardCenter;
+      }
+    } else {
+      objectiveStage = 'PORTAL';
+      objectivePos = this.portals[0] ? { x: this.portals[0].x, y: this.portals[0].y } : portalCenter;
+    }
+
+    return {
+      bounds: { width: this.layout.bounds.width, height: this.layout.bounds.height },
+      rooms: this.layout.rooms,
+      corridors: this.layout.corridors,
+      visitedRoomIndices: this.visitedRoomIndices,
+      player: { x: this.player.x, y: this.player.y },
+      objectivePos,
+      objectiveStage,
+    };
   }
 
   private advanceWorld(nowMs: number) {
@@ -688,6 +763,20 @@ export class GameEngine {
     if (this.combatWavesCleared < this.combatWaveTarget) return false;
     return this.enemies.length === 0;
   }
+
+  private updateVisitedRooms(playerX: number, playerY: number) {
+    const rooms = this.layout.rooms;
+    for (let i = 0; i < rooms.length; i++) {
+      const rect = rooms[i].rect;
+      if (pointInRect(playerX, playerY, rect)) {
+        this.visitedRoomIndices.add(i);
+      }
+    }
+  }
+}
+
+function pointInRect(x: number, y: number, rect: Rect): boolean {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
 
 function createOuterBoundsTiles(worldW: number, worldH: number, thickness: number): Tile[] {

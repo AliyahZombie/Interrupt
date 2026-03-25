@@ -68,6 +68,8 @@ export class Renderer {
     if (!engine.gameOver) {
       engine.player.draw(ctx, screenPx, screenPy);
 
+      this.drawPlayerEffects(engine, screenPx, screenPy, t);
+
       // Skill Aiming Indicator
       if (engine.activeSkillIndex !== null && engine.skillJoystick.active) {
         const skill = engine.skills[engine.activeSkillIndex];
@@ -130,7 +132,7 @@ export class Renderer {
       }
     }
 
-    this.drawUI(engine);
+    this.drawUI(engine, t);
   }
 
   private drawCyberGuidance(params: {
@@ -311,9 +313,11 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawUI(engine: GameEngine) {
+  private drawUI(engine: GameEngine, timeSec: number) {
     const { canvas, ctx } = this;
     if (engine.gameOver) return;
+
+    this.drawMinimap(engine, timeSec);
 
     const player = engine.player;
 
@@ -615,4 +619,367 @@ export class Renderer {
       ctx.fill();
     }
   }
+
+  private drawMinimap(engine: GameEngine, timeSec: number) {
+    const { canvas, ctx } = this;
+
+    if (canvas.width < 360 || canvas.height < 260) return;
+
+    const mm = engine.getMinimapData();
+    const boxSize = clamp(Math.round(Math.min(230, canvas.width * 0.28, canvas.height * 0.34)), 120, 240);
+    const margin = canvas.width < 520 ? 12 : 18;
+    const box = { x: canvas.width - boxSize - margin, y: margin, w: boxSize, h: boxSize };
+    const padding = boxSize < 150 ? 10 : 14;
+    const chamfer = boxSize < 150 ? 10 : 14;
+
+    const transform = computeMinimapTransform(mm.rooms, mm.corridors, box, padding);
+    if (!transform) return;
+
+    ctx.save();
+
+    drawChamferedPath(ctx, box, chamfer);
+    ctx.fillStyle = 'rgba(6, 10, 18, 0.78)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.28)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.clip();
+
+    const scanY = box.y + ((timeSec * 42) % box.h);
+    ctx.fillStyle = 'rgba(0, 240, 255, 0.07)';
+    ctx.fillRect(box.x, scanY, box.w, 8);
+
+    ctx.fillStyle = 'rgba(0, 240, 255, 0.12)';
+    for (const c of mm.corridors) {
+      const r = transform.toScreenRect(c);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+
+    for (let i = 0; i < mm.rooms.length; i++) {
+      const room = mm.rooms[i];
+      const r = transform.toScreenRect(room.rect);
+      const visited = mm.visitedRoomIndices.has(i);
+
+      const { fill, stroke } = getRoomMinimapColors(room.kind, visited);
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+    }
+
+    const targetKind = computeTargetRoomKind(mm.objectiveStage);
+    const targetRoom = mm.rooms.find(r => r.kind === targetKind);
+    if (targetRoom) {
+      const pulse = 0.55 + 0.45 * Math.sin(timeSec * 5.0);
+      const r = transform.toScreenRect(targetRoom.rect);
+      const c = getStageColor(mm.objectiveStage);
+      ctx.save();
+      ctx.strokeStyle = c;
+      ctx.globalAlpha = 0.35 + 0.35 * pulse;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.lineDashOffset = -(timeSec * 30);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = c;
+      ctx.strokeRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
+      ctx.restore();
+    }
+
+    if (mm.objectivePos) {
+      const obj = transform.toScreen(mm.objectivePos.x, mm.objectivePos.y);
+      const col = getStageColor(mm.objectiveStage);
+      const pulse = 0.5 + 0.5 * Math.sin(timeSec * 6.2);
+      const size = 4 + pulse * 2.5;
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 10 * pulse;
+      ctx.beginPath();
+      ctx.moveTo(obj.x, obj.y - size);
+      ctx.lineTo(obj.x + size, obj.y);
+      ctx.lineTo(obj.x, obj.y + size);
+      ctx.lineTo(obj.x - size, obj.y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const p = transform.toScreen(mm.player.x, mm.player.y);
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - 5);
+    ctx.lineTo(p.x + 4, p.y + 4);
+    ctx.lineTo(p.x - 4, p.y + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.font = 'bold 10px "JetBrains Mono", monospace, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('SYS.MAP', box.x + 10, box.y + 8);
+    ctx.restore();
+
+    ctx.restore();
+
+    ctx.save();
+    drawCornerAccents(ctx, box, chamfer);
+    ctx.restore();
+  }
+
+  private drawPlayerEffects(engine: GameEngine, screenPx: number, screenPy: number, timeSec: number) {
+    const { ctx } = this;
+    const player = engine.player;
+
+    const hasStun = player.hasEffect('STUN');
+    const hasPoison = player.hasEffect('POISON');
+    if (!hasStun && !hasPoison) return;
+
+    ctx.save();
+    ctx.translate(screenPx, screenPy);
+
+    const r = player.radius;
+    const w = r * 2.2;
+    const h = r * 2.2;
+
+    if (hasPoison) {
+      const pulse = 0.5 + 0.5 * Math.sin(timeSec * 4.2);
+      const green = '#39ff14';
+
+      ctx.save();
+      ctx.globalAlpha = 0.22 + 0.22 * pulse;
+      ctx.strokeStyle = green;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = green;
+      ctx.shadowBlur = 14;
+
+      const pad = 8 + 2.5 * pulse;
+      const chamfer = 8;
+      drawChamferedRect(ctx, -w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2, chamfer);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = '#b026ff';
+      const count = 6;
+      for (let i = 0; i < count; i++) {
+        const pTime = timeSec + i * 1.37;
+        const speed = 26 + (i % 3) * 6;
+        const travel = h + 30;
+        const y = h / 2 + 10 - ((pTime * speed) % travel);
+        const x = (-w / 2) + (w / count) * i + (rand01(i * 29.7 + timeSec * 0.7) - 0.5) * 10;
+        const a = clamp((y - (-h / 2 - 12)) / travel, 0, 1);
+        ctx.globalAlpha = a * 0.75;
+        const s = 2 + (i % 2) * 2;
+        ctx.fillRect(x, y, s, s);
+      }
+      ctx.restore();
+    }
+
+    if (hasStun) {
+      const cyan = '#00f0ff';
+      const yellow = '#fcee0a';
+      const flicker = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(timeSec * 22.0 + 1.7));
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(cyan, 0.75 * flicker);
+      ctx.lineWidth = 2;
+      ctx.shadowColor = cyan;
+      ctx.shadowBlur = 12;
+
+      const offset = 10;
+      const chamfer = 7;
+      const leg = Math.max(12, w * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 - offset, -h / 2 - offset + leg);
+      ctx.lineTo(-w / 2 - offset, -h / 2 - offset + chamfer);
+      ctx.lineTo(-w / 2 - offset + chamfer, -h / 2 - offset);
+      ctx.lineTo(-w / 2 - offset + leg, -h / 2 - offset);
+
+      ctx.moveTo(w / 2 + offset, h / 2 + offset - leg);
+      ctx.lineTo(w / 2 + offset, h / 2 + offset - chamfer);
+      ctx.lineTo(w / 2 + offset - chamfer, h / 2 + offset);
+      ctx.lineTo(w / 2 + offset - leg, h / 2 + offset);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(yellow, 0.85 * flicker);
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = yellow;
+      ctx.shadowBlur = 10;
+
+      const seed = Math.floor(timeSec * 15);
+      let cx = -w / 2 - 6;
+      let cy = (-h / 2) + h * (0.2 + 0.6 * Math.abs(Math.sin(seed * 12.3)));
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      for (let i = 1; i <= 3; i++) {
+        cx += (w + 12) / 3;
+        cy += Math.sin(seed * i * 7.1) * 12;
+        ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+}
+
+type MiniRect = { x: number; y: number; w: number; h: number };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function computeMinimapTransform(
+  rooms: { rect: { x: number; y: number; width: number; height: number } }[],
+  corridors: { x: number; y: number; width: number; height: number }[],
+  box: MiniRect,
+  padding: number,
+): {
+  toScreen: (wx: number, wy: number) => { x: number; y: number };
+  toScreenRect: (r: { x: number; y: number; width: number; height: number }) => MiniRect;
+} | null {
+  const rects: { x: number; y: number; width: number; height: number }[] = [];
+  for (const r of rooms) rects.push(r.rect);
+  for (const c of corridors) rects.push(c);
+  if (rects.length === 0) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const r of rects) {
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.width);
+    maxY = Math.max(maxY, r.y + r.height);
+  }
+  const worldW = Math.max(1, maxX - minX);
+  const worldH = Math.max(1, maxY - minY);
+  const availW = Math.max(1, box.w - padding * 2);
+  const availH = Math.max(1, box.h - padding * 2);
+  const scale = Math.min(availW / worldW, availH / worldH);
+
+  const mapW = worldW * scale;
+  const mapH = worldH * scale;
+  const offsetX = box.x + padding + (availW - mapW) / 2;
+  const offsetY = box.y + padding + (availH - mapH) / 2;
+
+  return {
+    toScreen: (wx, wy) => ({
+      x: offsetX + (wx - minX) * scale,
+      y: offsetY + (wy - minY) * scale,
+    }),
+    toScreenRect: (r) => ({
+      x: offsetX + (r.x - minX) * scale,
+      y: offsetY + (r.y - minY) * scale,
+      w: Math.max(1, r.width * scale),
+      h: Math.max(1, r.height * scale),
+    }),
+  };
+}
+
+function getStageColor(stage: 'HUB' | 'COMBAT' | 'REWARD' | 'PORTAL'): string {
+  if (stage === 'COMBAT') return '#ff003c';
+  if (stage === 'REWARD') return '#fcee0a';
+  return '#b026ff';
+}
+
+function computeTargetRoomKind(stage: 'COMBAT' | 'REWARD' | 'PORTAL'): 'COMBAT' | 'REWARD' | 'PORTAL' {
+  if (stage === 'COMBAT') return 'COMBAT';
+  if (stage === 'REWARD') return 'REWARD';
+  return 'PORTAL';
+}
+
+function getRoomMinimapColors(kind: 'HUB' | 'COMBAT' | 'REWARD' | 'PORTAL', visited: boolean): { fill: string; stroke: string } {
+  const base = kind === 'HUB' ? '#00f0ff' : getStageColor(kind);
+  if (!visited) {
+    return {
+      fill: 'rgba(0, 240, 255, 0.04)',
+      stroke: 'rgba(0, 240, 255, 0.18)',
+    };
+  }
+  if (kind === 'HUB') {
+    return { fill: 'rgba(0, 240, 255, 0.10)', stroke: withAlpha(base, 0.75) };
+  }
+  if (kind === 'COMBAT') {
+    return { fill: 'rgba(255, 0, 60, 0.12)', stroke: withAlpha(base, 0.75) };
+  }
+  if (kind === 'REWARD') {
+    return { fill: 'rgba(252, 238, 10, 0.10)', stroke: withAlpha(base, 0.78) };
+  }
+  return { fill: 'rgba(176, 38, 255, 0.10)', stroke: withAlpha(base, 0.78) };
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function drawChamferedPath(ctx: CanvasRenderingContext2D, box: MiniRect, chamfer: number) {
+  ctx.beginPath();
+  ctx.moveTo(box.x + chamfer, box.y);
+  ctx.lineTo(box.x + box.w, box.y);
+  ctx.lineTo(box.x + box.w, box.y + box.h - chamfer);
+  ctx.lineTo(box.x + box.w - chamfer, box.y + box.h);
+  ctx.lineTo(box.x, box.y + box.h);
+  ctx.lineTo(box.x, box.y + chamfer);
+  ctx.closePath();
+}
+
+function drawChamferedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, chamfer: number) {
+  const c = clamp(chamfer, 0, Math.min(w, h) * 0.25);
+  ctx.beginPath();
+  ctx.moveTo(x + c, y);
+  ctx.lineTo(x + w - c, y);
+  ctx.lineTo(x + w, y + c);
+  ctx.lineTo(x + w, y + h - c);
+  ctx.lineTo(x + w - c, y + h);
+  ctx.lineTo(x + c, y + h);
+  ctx.lineTo(x, y + h - c);
+  ctx.lineTo(x, y + c);
+  ctx.closePath();
+}
+
+function rand01(seed: number): number {
+  const s = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function drawCornerAccents(ctx: CanvasRenderingContext2D, box: MiniRect, chamfer: number) {
+  const len = 12;
+  const gap = 4;
+  ctx.strokeStyle = 'rgba(0, 240, 255, 0.85)';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(0, 240, 255, 0.65)';
+  ctx.shadowBlur = 10;
+
+  ctx.beginPath();
+  ctx.moveTo(box.x - gap, box.y + chamfer + len);
+  ctx.lineTo(box.x - gap, box.y + chamfer - gap * 0.4);
+  ctx.lineTo(box.x + chamfer - gap * 0.4, box.y - gap);
+  ctx.lineTo(box.x + chamfer + len, box.y - gap);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(box.x + box.w + gap, box.y + box.h - chamfer - len);
+  ctx.lineTo(box.x + box.w + gap, box.y + box.h - chamfer + gap * 0.4);
+  ctx.lineTo(box.x + box.w - chamfer + gap * 0.4, box.y + box.h + gap);
+  ctx.lineTo(box.x + box.w - chamfer - len, box.y + box.h + gap);
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
 }

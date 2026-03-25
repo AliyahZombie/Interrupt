@@ -126,9 +126,9 @@ export const Game = () => {
         actions={<CyberButton variant="ghost" onClick={() => setIsDebugPanelOpen(false)}>CLOSE</CyberButton>}
       >
         <div className="space-y-6">
-          <div className="flex flex-col gap-3">
-            <CyberText variant="label" color="cyan">ACTIONS</CyberText>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-3">
+              <CyberText variant="label" color="cyan">ACTIONS</CyberText>
+              <div className="grid grid-cols-2 gap-2">
               <CyberButton variant="danger" onClick={() => {
                 if (engineRef.current) engineRef.current.enemies = [];
               }}>CLEAR ENEMIES</CyberButton>
@@ -138,14 +138,20 @@ export const Game = () => {
                   engineRef.current.enemies.push(new RangedEnemy(player.x + 200, player.y));
                 }
               }}>SPAWN RANGED</CyberButton>
-              <CyberButton variant="primary" onClick={() => {
-                if (engineRef.current) {
-                  const { player } = engineRef.current;
-                  engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y));
-                }
-              }}>SPAWN MELEE</CyberButton>
-            </div>
-          </div>
+               <CyberButton variant="primary" onClick={() => {
+                 if (engineRef.current) {
+                   const { player } = engineRef.current;
+                   engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y));
+                 }
+               }}>SPAWN MELEE</CyberButton>
+               <CyberButton variant="primary" onClick={() => {
+                 engineRef.current?.applyPlayerEffect('STUN', 3000);
+               }}>STUN 3S</CyberButton>
+               <CyberButton variant="primary" onClick={() => {
+                 engineRef.current?.applyPlayerEffect('POISON', 8000);
+               }}>POISON 8S</CyberButton>
+             </div>
+           </div>
           
           <div className="flex flex-col gap-3">
             <CyberText variant="label" color="cyan">TOGGLES</CyberText>

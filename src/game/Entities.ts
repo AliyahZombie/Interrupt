@@ -436,6 +436,8 @@ export class Player {
   dashDy: number = 0;
   dashSpeed: number = 1600;
 
+  private effects = new Map<EffectKind, ActiveEffect>();
+
   shield: number = 0;
   maxShield: number = 0;
   shieldRegenDelayMs: number = 3500;
@@ -462,6 +464,7 @@ export class Player {
     this.hp = this.maxHp;
     this.shield = this.maxShield;
     this.lastDamagedAtMs = timeMs;
+    this.effects.clear();
   }
 
   applyDamage(amount: number, timeMs: number) {
@@ -482,6 +485,57 @@ export class Player {
     if (timeMs - this.lastDamagedAtMs < this.shieldRegenDelayMs) return;
 
     this.shield = Math.min(this.maxShield, this.shield + this.shieldRegenPerSecond * dt);
+  }
+
+  applyEffect(kind: EffectKind, durationMs: number, timeMs: number) {
+    const dur = Math.max(0, durationMs);
+    if (dur <= 0) return;
+    const existing = this.effects.get(kind);
+    if (!existing) {
+      this.effects.set(kind, { kind, remainingMs: dur, startedAtMs: timeMs });
+      return;
+    }
+    existing.remainingMs = Math.max(existing.remainingMs, dur);
+  }
+
+  hasEffect(kind: EffectKind): boolean {
+    const e = this.effects.get(kind);
+    return !!e && e.remainingMs > 0;
+  }
+
+  getEffectRemainingMs(kind: EffectKind): number {
+    const e = this.effects.get(kind);
+    return e ? Math.max(0, e.remainingMs) : 0;
+  }
+
+  updateEffects(dt: number, timeMs: number) {
+    if (this.effects.size === 0) return;
+
+    const dtMs = dt * 1000;
+    for (const e of this.effects.values()) {
+      e.remainingMs -= dtMs;
+    }
+
+    const poison = this.effects.get('POISON');
+    if (poison && poison.remainingMs > 0) {
+      const dps = 18;
+      const next = this.hp - dps * dt;
+      const clamped = Math.max(1, next);
+      if (clamped < this.hp) {
+        this.hp = clamped;
+        this.lastDamagedAtMs = timeMs;
+      }
+    }
+
+    for (const [kind, e] of this.effects) {
+      if (e.remainingMs <= 0) {
+        this.effects.delete(kind);
+      }
+    }
+  }
+
+  isStunned(): boolean {
+    return this.hasEffect('STUN');
   }
 
   update(dt: number, worldWidth: number, worldHeight: number) {
@@ -511,6 +565,14 @@ export class Player {
     ctx.shadowBlur = 0;
   }
 }
+
+export type EffectKind = 'STUN' | 'POISON';
+
+type ActiveEffect = {
+  kind: EffectKind;
+  remainingMs: number;
+  startedAtMs: number;
+};
 
 export abstract class BaseEnemy {
   constructor(
