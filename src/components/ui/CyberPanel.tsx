@@ -3,12 +3,14 @@ import React from 'react';
 interface CyberPanelProps {
   children: React.ReactNode;
   className?: string;
+  contentClassName?: string;
   variant?: 'cyan' | 'red' | 'neutral';
 }
 
 export const CyberPanel: React.FC<CyberPanelProps> = ({ 
   children, 
   className = '',
+  contentClassName = '',
   variant = 'cyan'
 }) => {
   const variants = {
@@ -18,13 +20,15 @@ export const CyberPanel: React.FC<CyberPanelProps> = ({
   };
 
   return (
-    <div className={`relative bg-black/80 backdrop-blur-md border ${variants[variant]} p-8 clip-chamfer ${className}`}>
+    <div
+      className={`relative bg-black/80 backdrop-blur-md border ${variants[variant]} p-4 sm:p-6 md:p-8 clip-chamfer ${className}`}
+    >
       {/* Subtle grid background inside panel */}
       <div 
         className="absolute inset-0 opacity-[0.03] pointer-events-none" 
         style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '20px 20px' }}
       ></div>
-      <div className="relative z-10">
+      <div className={`relative z-10 ${contentClassName}`}>
         {children}
       </div>
     </div>

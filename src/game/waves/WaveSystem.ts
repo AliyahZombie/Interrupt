@@ -1,4 +1,5 @@
 import type { Difficulty } from '../Difficulty';
+import type { Rect } from '../world/types';
 
 export type WavePhase = 'SPAWNING' | 'WAIT_CLEAR' | 'INTERMISSION';
 
@@ -34,6 +35,7 @@ export interface WaveUpdateInput {
   viewportHeight: number;
   worldWidth: number;
   worldHeight: number;
+  spawnRect?: Rect;
   rng?: () => number;
 }
 
@@ -195,13 +197,32 @@ export class WaveSystem {
       y = input.cameraY + rng() * input.viewportHeight;
     }
 
-    x = Math.max(0, Math.min(input.worldWidth, x));
-    y = Math.max(0, Math.min(input.worldHeight, y));
-
     const wave = this.state.index;
     const waveRangedBase = 0.2 + wave * 0.03;
     const rangedChance = Math.max(0.2, Math.min(0.6, waveRangedBase + (this.difficulty === 'HARD' ? 0.05 : 0)));
     const kind: SpawnKind = rng() < rangedChance ? 'RANGED' : 'MELEE';
+    const spawnRadius = kind === 'MELEE' ? 18 : 15;
+
+    const clamp = (value: number, min: number, max: number) => {
+      return Math.max(min, Math.min(max, value));
+    };
+    const clampSafe = (value: number, min: number, max: number, fallback: number) => {
+      if (min > max) return fallback;
+      return clamp(value, min, max);
+    };
+
+    if (input.spawnRect) {
+      const r = input.spawnRect;
+      const minX = r.x + spawnRadius;
+      const maxX = r.x + r.width - spawnRadius;
+      const minY = r.y + spawnRadius;
+      const maxY = r.y + r.height - spawnRadius;
+      x = clampSafe(x, minX, maxX, r.x + r.width / 2);
+      y = clampSafe(y, minY, maxY, r.y + r.height / 2);
+    } else {
+      x = clampSafe(x, spawnRadius, input.worldWidth - spawnRadius, input.worldWidth / 2);
+      y = clampSafe(y, spawnRadius, input.worldHeight - spawnRadius, input.worldHeight / 2);
+    }
     return { kind, x, y };
   }
 }

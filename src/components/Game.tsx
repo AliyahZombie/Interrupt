@@ -9,6 +9,7 @@ export const Game = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const [isPortrait, setIsPortrait] = useState(false);
+  const [isShortLandscape, setIsShortLandscape] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [forceStart, setForceStart] = useState(false);
   const [gameState, setGameState] = useState<'START' | 'PLAYING' | 'GAME_OVER'>('START');
@@ -51,7 +52,9 @@ export const Game = () => {
 
   useEffect(() => {
     const checkOrientation = () => {
-      setIsPortrait(window.innerHeight > window.innerWidth);
+      const portrait = window.innerHeight > window.innerWidth;
+      setIsPortrait(portrait);
+      setIsShortLandscape(!portrait && window.innerHeight <= 520);
     };
     window.addEventListener('resize', checkOrientation);
     checkOrientation();
@@ -193,52 +196,72 @@ export const Game = () => {
 
       {/* UI Overlays */}
       {gameState === 'START' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-20">
-          <CyberPanel variant="cyan" className="flex flex-col items-center text-center">
-            <CyberGlitchText text="SURVIVOR" color="cyan" className="text-5xl md:text-7xl mb-2" />
-            <CyberText variant="label" color="neutral" className="mb-8">SYSTEM INITIALIZATION READY</CyberText>
+        <div className="absolute inset-0 z-20 overflow-hidden bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0 p-4 flex items-center justify-center">
+            <div className="w-full max-w-lg max-h-[calc(100svh-2rem)]">
+              <CyberPanel
+                variant="cyan"
+                className="w-full max-h-[calc(100svh-2rem)]"
+                contentClassName="flex flex-col items-center text-center max-h-[calc(100svh-2rem)]"
+              >
+                <CyberGlitchText
+                  text="SURVIVOR"
+                  color="cyan"
+                  className={isShortLandscape ? 'text-4xl md:text-5xl mb-1' : 'text-5xl md:text-7xl mb-2'}
+                />
+                <CyberText variant="label" color="neutral" className={isShortLandscape ? 'mb-4' : 'mb-8'}>
+                  SYSTEM INITIALIZATION READY
+                </CyberText>
 
-            <div className="w-full mb-6">
-              <CyberText variant="label" color="cyan" className="mb-3">DIFFICULTY</CyberText>
-              <div className="grid grid-cols-3 gap-2">
-                <CyberButton
-                  variant={difficulty === 'EASY' ? 'primary' : 'ghost'}
-                  onClick={() => setDifficulty('EASY')}
-                  className="px-3 py-2"
-                >
-                  EASY
-                </CyberButton>
-                <CyberButton
-                  variant={difficulty === 'NORMAL' ? 'primary' : 'ghost'}
-                  onClick={() => setDifficulty('NORMAL')}
-                  className="px-3 py-2"
-                >
-                  NORMAL
-                </CyberButton>
-                <CyberButton
-                  variant={difficulty === 'HARD' ? 'danger' : 'ghost'}
-                  onClick={() => setDifficulty('HARD')}
-                  className="px-3 py-2"
-                >
-                  HARD
-                </CyberButton>
-              </div>
-              <CyberText variant="body" color="neutral" className="mt-3">
-                {difficulty === 'EASY' && 'PLAYER TAKES 50% DAMAGE'}
-                {difficulty === 'NORMAL' && 'STANDARD DAMAGE'}
-                {difficulty === 'HARD' && 'PLAYER TAKES 150% DAMAGE • ENEMIES DODGE BULLETS'}
-              </CyberText>
-            </div>
+                <div className={isShortLandscape ? 'w-full mb-4' : 'w-full mb-6'}>
+                  <CyberText variant="label" color="cyan" className={isShortLandscape ? 'mb-2' : 'mb-3'}>
+                    DIFFICULTY
+                  </CyberText>
+                  <div className="grid grid-cols-3 gap-2">
+                    <CyberButton
+                      variant={difficulty === 'EASY' ? 'primary' : 'ghost'}
+                      onClick={() => setDifficulty('EASY')}
+                      className={isShortLandscape ? 'px-3 py-1.5' : 'px-3 py-2'}
+                    >
+                      EASY
+                    </CyberButton>
+                    <CyberButton
+                      variant={difficulty === 'NORMAL' ? 'primary' : 'ghost'}
+                      onClick={() => setDifficulty('NORMAL')}
+                      className={isShortLandscape ? 'px-3 py-1.5' : 'px-3 py-2'}
+                    >
+                      NORMAL
+                    </CyberButton>
+                    <CyberButton
+                      variant={difficulty === 'HARD' ? 'danger' : 'ghost'}
+                      onClick={() => setDifficulty('HARD')}
+                      className={isShortLandscape ? 'px-3 py-1.5' : 'px-3 py-2'}
+                    >
+                      HARD
+                    </CyberButton>
+                  </div>
+                  <CyberText
+                    variant="body"
+                    color="neutral"
+                    className={isShortLandscape ? 'mt-2 text-sm md:text-base' : 'mt-3'}
+                  >
+                    {difficulty === 'EASY' && 'PLAYER TAKES 50% DAMAGE'}
+                    {difficulty === 'NORMAL' && 'STANDARD DAMAGE'}
+                    {difficulty === 'HARD' && 'PLAYER TAKES 150% DAMAGE • ENEMIES DODGE BULLETS'}
+                  </CyberText>
+                </div>
 
-            <div className="flex flex-col gap-4 w-full">
-              <CyberButton variant="primary" onClick={handleStartGame}>
-                START GAME
-              </CyberButton>
-              <CyberButton variant="ghost" onClick={() => setShowUIPreview(true)}>
-                UI COMPONENTS
-              </CyberButton>
+                <div className={isShortLandscape ? 'flex flex-col gap-3 w-full' : 'flex flex-col gap-4 w-full'}>
+                  <CyberButton variant="primary" onClick={handleStartGame}>
+                    START GAME
+                  </CyberButton>
+                  <CyberButton variant="ghost" onClick={() => setShowUIPreview(true)}>
+                    UI COMPONENTS
+                  </CyberButton>
+                </div>
+              </CyberPanel>
             </div>
-          </CyberPanel>
+          </div>
         </div>
       )}
 
@@ -292,15 +315,34 @@ export const Game = () => {
       </CyberModal>
 
       {gameState === 'GAME_OVER' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-20">
-          <CyberPanel variant="red" className="flex flex-col items-center text-center">
-            <CyberText variant="h1" color="red" glow className="mb-2">SYSTEM FAILURE</CyberText>
-            <CyberText variant="h3" color="white" className="mb-2">FINAL SCORE: {score}</CyberText>
-            <CyberText variant="label" color="cyan" className="mb-8">CREDITS COLLECTED: {credits}</CyberText>
-            <CyberButton variant="primary" onClick={handleStartGame}>
-              REBOOT SYSTEM
-            </CyberButton>
-          </CyberPanel>
+        <div className="absolute inset-0 z-20 overflow-hidden bg-black/80 backdrop-blur-md">
+          <div className="absolute inset-0 p-4 flex items-center justify-center">
+            <div className="w-full max-w-md max-h-[calc(100svh-2rem)]">
+              <CyberPanel
+                variant="red"
+                className="w-full max-h-[calc(100svh-2rem)]"
+                contentClassName="flex flex-col items-center text-center max-h-[calc(100svh-2rem)]"
+              >
+                <CyberText
+                  variant="h1"
+                  color="red"
+                  glow
+                  className={isShortLandscape ? 'mb-1 text-4xl md:text-5xl' : 'mb-2'}
+                >
+                  SYSTEM FAILURE
+                </CyberText>
+                <CyberText variant="h3" color="white" className={isShortLandscape ? 'mb-1 text-lg md:text-xl' : 'mb-2'}>
+                  FINAL SCORE: {score}
+                </CyberText>
+                <CyberText variant="label" color="cyan" className={isShortLandscape ? 'mb-4' : 'mb-8'}>
+                  CREDITS COLLECTED: {credits}
+                </CyberText>
+                <CyberButton variant="primary" onClick={handleStartGame}>
+                  REBOOT SYSTEM
+                </CyberButton>
+              </CyberPanel>
+            </div>
+          </div>
         </div>
       )}
 
@@ -314,7 +356,7 @@ export const Game = () => {
 
       {isPortrait && !forceStart && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-cyber-bg text-white p-8 text-center bg-scanlines">
-          <CyberPanel variant="cyan" className="max-w-md">
+          <CyberPanel variant="cyan" className="w-full max-w-md" contentClassName="text-center">
             <CyberText variant="h2" color="cyan" glow className="mb-4">ROTATE DEVICE</CyberText>
             <CyberText variant="body" color="neutral" className="mb-8">
               This game is designed to be played in landscape mode for the best experience.

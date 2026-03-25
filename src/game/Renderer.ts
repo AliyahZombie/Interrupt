@@ -1,6 +1,8 @@
 import type { GameEngine, JoystickData } from './Engine';
 
 export class Renderer {
+  private navStartedAtSec: number | null = null;
+
   constructor(public canvas: HTMLCanvasElement, public ctx: CanvasRenderingContext2D) {}
 
   draw(engine: GameEngine) {
@@ -12,7 +14,7 @@ export class Renderer {
 
     if (!engine.gameStarted) {
       // Draw some cool background for the menu
-      this.drawGrid(engine, 0, 0);
+      this.drawGrid(0, 0);
       return;
     }
 
@@ -24,17 +26,41 @@ export class Renderer {
     const screenPx = engine.player.x - cameraX;
     const screenPy = engine.player.y - cameraY;
 
-    this.drawGrid(engine, cameraX, cameraY);
+    this.drawGrid(cameraX, cameraY);
 
-    // Bounds
-    ctx.save();
-    ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(-cameraX, -cameraY, engine.world.width, engine.world.height);
-    ctx.restore();
+    if (engine.debugFlags.showWaveDebug) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.35)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-cameraX, -cameraY, engine.world.width, engine.world.height);
+      ctx.restore();
+    }
+
+    const t = performance.now() / 1000;
+
+    if (engine.navigationPath) {
+      if (this.navStartedAtSec === null) {
+        this.navStartedAtSec = t;
+      }
+      const start = { x: engine.player.x, y: engine.player.y + engine.player.radius * 0.65 };
+      this.drawCyberGuidance({
+        start,
+        path: engine.navigationPath.points,
+        cameraX,
+        cameraY,
+        timeSec: t,
+        revealSec: Math.max(0, t - this.navStartedAtSec),
+      });
+    } else {
+      this.navStartedAtSec = null;
+    }
+
+    engine.tiles.forEach(tile => tile.draw(ctx, cameraX, cameraY, t));
 
     // Entities
-    engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, performance.now() / 1000));
+    engine.portals.forEach(p => p.draw(ctx, cameraX, cameraY, t));
+    engine.healthPickups.forEach(h => h.draw(ctx, cameraX, cameraY, t));
+    engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, t));
     engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
     engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY));
     engine.projectiles.forEach(p => p.draw(ctx, cameraX, cameraY));
@@ -107,7 +133,163 @@ export class Renderer {
     this.drawUI(engine);
   }
 
-  private drawGrid(engine: GameEngine, cameraX: number, cameraY: number) {
+  private drawCyberGuidance(params: {
+    start: { x: number; y: number };
+    path: { x: number; y: number }[];
+    cameraX: number;
+    cameraY: number;
+    timeSec: number;
+    revealSec: number;
+  }) {
+    const { ctx } = this;
+    const { start, path, cameraX, cameraY, timeSec, revealSec } = params;
+    const fullPath: { x: number; y: number }[] = [start];
+    for (const p of path) {
+      const last = fullPath[fullPath.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) < 4) continue;
+      fullPath.push(p);
+    }
+
+    const maxDist = 720;
+    const revealSpeed = 1500;
+    const revealLen = Math.max(0, Math.min(maxDist, revealSec * revealSpeed));
+    const renderPath = this.buildClampedPath(fullPath, revealLen);
+
+    ctx.save();
+    ctx.translate(-cameraX, -cameraY);
+
+    const primary = '#00f0ff';
+    const whiteHot = '#ffffff';
+    const dashOffset = -(timeSec * 120);
+    const pulse = 0.7 + 0.3 * Math.sin(timeSec * 4);
+
+    ctx.beginPath();
+    const ringSize = 12 + 2 * pulse;
+    ctx.strokeStyle = primary;
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = primary;
+
+    const bracketGap = 6;
+    ctx.moveTo(start.x - ringSize, start.y - ringSize / 2);
+    ctx.lineTo(start.x - ringSize, start.y + ringSize / 2);
+    ctx.lineTo(start.x - ringSize + bracketGap, start.y + ringSize / 2);
+    ctx.moveTo(start.x - ringSize, start.y - ringSize / 2);
+    ctx.lineTo(start.x - ringSize + bracketGap, start.y - ringSize / 2);
+
+    ctx.moveTo(start.x + ringSize, start.y - ringSize / 2);
+    ctx.lineTo(start.x + ringSize, start.y + ringSize / 2);
+    ctx.lineTo(start.x + ringSize - bracketGap, start.y + ringSize / 2);
+    ctx.moveTo(start.x + ringSize, start.y - ringSize / 2);
+    ctx.lineTo(start.x + ringSize - bracketGap, start.y - ringSize / 2);
+    ctx.stroke();
+
+    if (renderPath.length >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(renderPath[0].x, renderPath[0].y);
+      for (let i = 1; i < renderPath.length; i++) {
+        ctx.lineTo(renderPath[i].x, renderPath[i].y);
+      }
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = primary;
+      ctx.globalAlpha = 0.16 * pulse;
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = primary;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(renderPath[0].x, renderPath[0].y);
+      for (let i = 1; i < renderPath.length; i++) {
+        ctx.lineTo(renderPath[i].x, renderPath[i].y);
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = primary;
+      ctx.setLineDash([18, 22]);
+      ctx.lineDashOffset = dashOffset;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      this.drawChevrons(renderPath, timeSec, whiteHot);
+    }
+
+    ctx.restore();
+  }
+
+  private buildClampedPath(points: { x: number; y: number }[], maxLen: number): { x: number; y: number }[] {
+    if (points.length === 0) return [];
+    const out: { x: number; y: number }[] = [points[0]];
+    let remaining = maxLen;
+    for (let i = 0; i < points.length - 1 && remaining > 0; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const segLen = Math.hypot(dx, dy);
+      if (segLen <= 1e-6) continue;
+      if (segLen <= remaining) {
+        out.push(b);
+        remaining -= segLen;
+        continue;
+      }
+      const t = remaining / segLen;
+      out.push({ x: a.x + dx * t, y: a.y + dy * t });
+      remaining = 0;
+    }
+    return out;
+  }
+
+  private drawChevrons(path: { x: number; y: number }[], timeSec: number, color: string) {
+    const { ctx } = this;
+    const spacing = 120;
+    const size = 7;
+    const flowSpeed = 120;
+    const baseDist = (timeSec * flowSpeed) % spacing;
+
+    ctx.fillStyle = color;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = color;
+
+    let curDist = 0;
+    let nextDist = baseDist;
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const segLen = Math.hypot(dx, dy);
+      if (segLen <= 1e-6) continue;
+      const angle = Math.atan2(dy, dx);
+
+      while (nextDist <= curDist + segLen) {
+        const d = nextDist - curDist;
+        const t = d / segLen;
+        const cx = a.x + dx * t;
+        const cy = a.y + dy * t;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(-size, -size);
+        ctx.lineTo(size, 0);
+        ctx.lineTo(-size, size);
+        ctx.fill();
+        ctx.restore();
+
+        nextDist += spacing;
+      }
+
+      curDist += segLen;
+    }
+
+    ctx.shadowBlur = 0;
+  }
+
+  private drawGrid(cameraX: number, cameraY: number) {
     const { canvas, ctx } = this;
     ctx.save();
     ctx.strokeStyle = 'rgba(6, 182, 212, 0.2)';
