@@ -2,6 +2,7 @@ import type { GameState } from '../GameState';
 import { EffectManager } from '../../effects/EffectManager';
 import { createBlindEffect, createBurnEffectKillable, createPoisonEffectKillable, createStunEffect } from '../../effects/effects';
 import type { EffectKind } from '../../effects/types';
+import type { Language } from '../../../i18n/translations';
 
 export abstract class BaseEnemy {
   lastDamagedAtMs: number = -Infinity;
@@ -43,7 +44,8 @@ export abstract class BaseEnemy {
     this.effectManager.update({ dt, timeMs }, this);
   }
 
-  draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
+  draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, language?: Language) {
+    void language;
     ctx.shadowColor = this.color;
     ctx.shadowBlur = 15;
     ctx.beginPath();

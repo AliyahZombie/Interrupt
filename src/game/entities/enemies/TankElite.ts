@@ -3,6 +3,7 @@ import type { GameState } from '../GameState';
 import { clamp, normalize } from '../math';
 import { BaseEnemy } from './BaseEnemy';
 import { computeSeparation } from './steering';
+import type { Language } from '../../../i18n/translations';
 
 export class TankElite extends BaseEnemy {
   lastShot: number = 0;
@@ -75,7 +76,8 @@ export class TankElite extends BaseEnemy {
     }
   }
 
-  override draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
+  override draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, language: Language = 'en') {
+    void language;
     super.draw(ctx, cameraX, cameraY);
 
     const sx = this.x - cameraX;

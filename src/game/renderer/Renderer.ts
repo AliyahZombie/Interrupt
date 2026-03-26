@@ -1,5 +1,6 @@
 import type { GameEngine } from '../Engine';
 import type { JoystickData } from '../EngineTypes';
+import { translate } from '../../i18n/translate';
 
 export class Renderer {
   private navStartedAtSec: number | null = null;
@@ -61,7 +62,7 @@ export class Renderer {
     engine.weaponDrops.forEach(w => w.draw(ctx, cameraX, cameraY, t));
     engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, t));
     engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
-    engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY));
+    engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY, engine.language ?? 'en'));
 
     for (const projectile of engine.projectiles) {
       if (!projectile.isPlayer) {
@@ -403,6 +404,7 @@ export class Renderer {
     this.drawMinimap(engine, timeSec);
 
     const player = engine.player;
+    const language = engine.language ?? 'en';
 
     if (player.maxShield > 0) {
       const barWidth = 300;
@@ -452,7 +454,7 @@ export class Renderer {
       ctx.font = 'bold 11px "JetBrains Mono", monospace, sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('AUX.SHIELD', barX, barY - 6);
+      ctx.fillText(translate(language, 'hud.auxShield'), barX, barY - 6);
 
       ctx.textAlign = 'right';
       ctx.fillStyle = isLowShield ? '#eab308' : '#06b6d4';
@@ -505,7 +507,7 @@ export class Renderer {
     ctx.font = 'bold 12px "JetBrains Mono", monospace, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`SYS.INTEGRITY`, hpBarX, hpBarY - 6);
+    ctx.fillText(translate(language, 'hud.sysIntegrity'), hpBarX, hpBarY - 6);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = isLowHp ? '#ef4444' : '#06b6d4';
@@ -515,20 +517,20 @@ export class Renderer {
     ctx.textAlign = 'left';
     ctx.font = '24px "JetBrains Mono", monospace, sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(`SCORE: ${engine.score}`, 20, 40);
+    ctx.fillText(`${translate(language, 'hud.score')}: ${engine.score}`, 20, 40);
 
     ctx.fillStyle = '#06b6d4';
-    ctx.fillText(`CREDITS: ${engine.collectedCredits}`, 20, 70);
+    ctx.fillText(`${translate(language, 'hud.credits')}: ${engine.collectedCredits}`, 20, 70);
 
     const statuses: Array<{ label: string; color: string; remainingMs: number }> = [];
     const blindLeft = player.getEffectRemainingMs('BLIND');
-    if (blindLeft > 0) statuses.push({ label: 'BLIND', color: '#00f0ff', remainingMs: blindLeft });
+    if (blindLeft > 0) statuses.push({ label: translate(language, 'status.blind'), color: '#00f0ff', remainingMs: blindLeft });
     const stunLeft = player.getEffectRemainingMs('STUN');
-    if (stunLeft > 0) statuses.push({ label: 'STUN', color: '#eab308', remainingMs: stunLeft });
+    if (stunLeft > 0) statuses.push({ label: translate(language, 'status.stun'), color: '#eab308', remainingMs: stunLeft });
     const poisonLeft = player.getEffectRemainingMs('POISON');
-    if (poisonLeft > 0) statuses.push({ label: 'POISON', color: '#22c55e', remainingMs: poisonLeft });
+    if (poisonLeft > 0) statuses.push({ label: translate(language, 'status.poison'), color: '#22c55e', remainingMs: poisonLeft });
     const burnLeft = player.getEffectRemainingMs('BURN');
-    if (burnLeft > 0) statuses.push({ label: 'BURN', color: '#f97316', remainingMs: burnLeft });
+    if (burnLeft > 0) statuses.push({ label: translate(language, 'status.burn'), color: '#f97316', remainingMs: burnLeft });
 
     if (statuses.length > 0) {
       ctx.save();
@@ -606,7 +608,12 @@ export class Renderer {
         ctx.font = 'bold 12px "JetBrains Mono"';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(skill.name, pos.x, pos.y);
+        const skillName = skill.id === 'dash'
+          ? translate(language, 'skill.dash')
+          : skill.id === 'bounce'
+            ? translate(language, 'skill.bounce')
+            : skill.name;
+        ctx.fillText(skillName, pos.x, pos.y);
 
         if (skill.currentCooldown > 0) {
           const cdRatio = skill.currentCooldown / skill.cooldown;
@@ -763,7 +770,7 @@ export class Renderer {
     ctx.font = 'bold 10px "JetBrains Mono", monospace, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('SYS.MAP', box.x + 10, box.y + 8);
+    ctx.fillText(translate(engine.language ?? 'en', 'hud.sysMap'), box.x + 10, box.y + 8);
     ctx.restore();
 
     ctx.restore();
