@@ -6,8 +6,10 @@ import type { NearbyInteractableEntry } from '../game/Entities';
 import type { Difficulty } from '../game/Difficulty';
 import type { WeaponId } from '../game/combat/Weapon';
 import { CyberButton, CyberPanel, CyberText, CyberBadge, CyberInput, CyberProgressBar, CyberGlitchText, CyberModal } from './ui';
+import { useI18n } from '../i18n';
 
 export const Game = () => {
+  const { t, language, setLanguage } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const [isPortrait, setIsPortrait] = useState(false);
@@ -21,7 +23,7 @@ export const Game = () => {
   const [showUIPreview, setShowUIPreview] = useState(false);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const [spawnLevelText, setSpawnLevelText] = useState('1');
-  const [weaponSlots, setWeaponSlots] = useState<Array<{ id: WeaponId; name: string } | null>>([null, null]);
+  const [weaponSlots, setWeaponSlots] = useState<Array<WeaponId | null>>([null, null]);
   const [activeWeaponIndex, setActiveWeaponIndex] = useState<0 | 1>(0);
   const [nearbyDrops, setNearbyDrops] = useState<NearbyInteractableEntry[]>([]);
   const [debugFlags, setDebugFlags] = useState({
@@ -30,6 +32,11 @@ export const Game = () => {
     noCooldowns: false,
     showWaveDebug: false,
   });
+
+  const weaponKeyById = {
+    default: 'weapon.default',
+    bounce_gun: 'weapon.bounce_gun',
+  } satisfies Record<WeaponId, 'weapon.default' | 'weapon.bounce_gun'>;
 
   const debugFlagsRef = useRef(debugFlags);
   useEffect(() => {
@@ -72,6 +79,8 @@ export const Game = () => {
     const engine = new GameEngine(canvasRef.current);
     engineRef.current = engine;
 
+    engine.setLanguage(language);
+
     engine.debugFlags.stopSpawning = debugFlagsRef.current.stopSpawning;
     engine.debugFlags.godMode = debugFlagsRef.current.godMode;
     engine.debugFlags.noCooldowns = debugFlagsRef.current.noCooldowns;
@@ -98,6 +107,8 @@ export const Game = () => {
     };
   }, [isPortrait, forceStart]);
 
+  
+
   useEffect(() => {
     if (gameState !== 'PLAYING') return;
     const id = window.setInterval(() => {
@@ -115,6 +126,10 @@ export const Game = () => {
       engineRef.current.startGame(difficulty);
     }
   };
+
+  useEffect(() => {
+    engineRef.current?.setLanguage(language);
+  }, [language]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cyber-bg">
@@ -267,7 +282,7 @@ export const Game = () => {
                     <span className="flex items-start gap-2">
                       <CyberBadge variant={isActive ? 'cyan' : 'neutral'}>{idx + 1}</CyberBadge>
                       <span className="font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight">
-                        {slot ? slot.name : 'EMPTY'}
+                        {slot ? t(weaponKeyById[slot]) : t('weapon.empty')}
                       </span>
                     </span>
                   </CyberButton>
@@ -314,18 +329,34 @@ export const Game = () => {
                 className="w-full max-h-[calc(100svh-2rem)]"
                 contentClassName="flex flex-col items-center text-center max-h-[calc(100svh-2rem)]"
               >
+                <div className="w-full flex items-center justify-end gap-2 mb-2">
+                  <CyberButton
+                    variant={language === 'en' ? 'primary' : 'ghost'}
+                    onClick={() => setLanguage('en')}
+                    className="!px-3 !py-1.5"
+                  >
+                    EN
+                  </CyberButton>
+                  <CyberButton
+                    variant={language === 'zh' ? 'primary' : 'ghost'}
+                    onClick={() => setLanguage('zh')}
+                    className="!px-3 !py-1.5"
+                  >
+                    中文
+                  </CyberButton>
+                </div>
                 <CyberGlitchText
-                  text="SURVIVOR"
+                  text={t('menu.title')}
                   color="cyan"
                   className={isShortLandscape ? 'text-4xl md:text-5xl mb-1' : 'text-5xl md:text-7xl mb-2'}
                 />
                 <CyberText variant="label" color="neutral" className={isShortLandscape ? 'mb-4' : 'mb-8'}>
-                  SYSTEM INITIALIZATION READY
+                  {t('menu.subtitle')}
                 </CyberText>
 
                 <div className={isShortLandscape ? 'w-full mb-4' : 'w-full mb-6'}>
                   <CyberText variant="label" color="cyan" className={isShortLandscape ? 'mb-2' : 'mb-3'}>
-                    DIFFICULTY
+                    {t('menu.difficulty')}
                   </CyberText>
                   <div className="grid grid-cols-3 gap-2">
                     <CyberButton
@@ -333,21 +364,21 @@ export const Game = () => {
                       onClick={() => setDifficulty('EASY')}
                       className={isShortLandscape ? 'px-3 py-1.5' : 'px-3 py-2'}
                     >
-                      EASY
+                      {t('menu.difficulty.easy')}
                     </CyberButton>
                     <CyberButton
                       variant={difficulty === 'NORMAL' ? 'primary' : 'ghost'}
                       onClick={() => setDifficulty('NORMAL')}
                       className={isShortLandscape ? 'px-3 py-1.5' : 'px-3 py-2'}
                     >
-                      NORMAL
+                      {t('menu.difficulty.normal')}
                     </CyberButton>
                     <CyberButton
                       variant={difficulty === 'HARD' ? 'danger' : 'ghost'}
                       onClick={() => setDifficulty('HARD')}
                       className={isShortLandscape ? 'px-3 py-1.5' : 'px-3 py-2'}
                     >
-                      HARD
+                      {t('menu.difficulty.hard')}
                     </CyberButton>
                   </div>
                   <CyberText
@@ -355,18 +386,18 @@ export const Game = () => {
                     color="neutral"
                     className={isShortLandscape ? 'mt-2 text-sm md:text-base' : 'mt-3'}
                   >
-                    {difficulty === 'EASY' && 'PLAYER TAKES 50% DAMAGE'}
-                    {difficulty === 'NORMAL' && 'STANDARD DAMAGE'}
-                    {difficulty === 'HARD' && 'PLAYER TAKES 150% DAMAGE • ENEMIES DODGE BULLETS'}
+                    {difficulty === 'EASY' && t('menu.difficultyDesc.easy')}
+                    {difficulty === 'NORMAL' && t('menu.difficultyDesc.normal')}
+                    {difficulty === 'HARD' && t('menu.difficultyDesc.hard')}
                   </CyberText>
                 </div>
 
                 <div className={isShortLandscape ? 'flex flex-col gap-3 w-full' : 'flex flex-col gap-4 w-full'}>
                   <CyberButton variant="primary" onClick={handleStartGame}>
-                    START GAME
+                    {t('menu.startGame')}
                   </CyberButton>
                   <CyberButton variant="ghost" onClick={() => setShowUIPreview(true)}>
-                    UI COMPONENTS
+                    {t('menu.uiComponents')}
                   </CyberButton>
                 </div>
               </CyberPanel>
@@ -379,45 +410,45 @@ export const Game = () => {
       <CyberModal 
         isOpen={showUIPreview} 
         onClose={() => setShowUIPreview(false)} 
-        title="UI COMPONENT LIBRARY"
+        title={t('uiPreview.title')}
         variant="cyan"
         actions={
-          <CyberButton variant="ghost" onClick={() => setShowUIPreview(false)}>CLOSE</CyberButton>
+          <CyberButton variant="ghost" onClick={() => setShowUIPreview(false)}>{t('uiPreview.close')}</CyberButton>
         }
       >
         <div className="flex flex-col gap-8 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
           
           <div className="flex flex-col gap-2">
-            <CyberText variant="label" color="cyan">Badges</CyberText>
+            <CyberText variant="label" color="cyan">{t('uiPreview.section.badges')}</CyberText>
             <div className="flex flex-wrap gap-2">
-              <CyberBadge variant="cyan" glow>Active</CyberBadge>
-              <CyberBadge variant="red" glow>Danger</CyberBadge>
-              <CyberBadge variant="yellow" glow>Warning</CyberBadge>
-              <CyberBadge variant="purple" glow>Epic</CyberBadge>
-              <CyberBadge variant="neutral">Offline</CyberBadge>
+              <CyberBadge variant="cyan" glow>{t('uiPreview.badge.active')}</CyberBadge>
+              <CyberBadge variant="red" glow>{t('uiPreview.badge.danger')}</CyberBadge>
+              <CyberBadge variant="yellow" glow>{t('uiPreview.badge.warning')}</CyberBadge>
+              <CyberBadge variant="purple" glow>{t('uiPreview.badge.epic')}</CyberBadge>
+              <CyberBadge variant="neutral">{t('uiPreview.badge.offline')}</CyberBadge>
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <CyberText variant="label" color="cyan">Progress Bars</CyberText>
+            <CyberText variant="label" color="cyan">{t('uiPreview.section.progressBars')}</CyberText>
             <div className="flex flex-col gap-4">
-              <CyberProgressBar value={75} max={100} variant="cyan" label="HP" showValue />
-              <CyberProgressBar value={30} max={100} variant="red" label="SHIELD" showValue />
-              <CyberProgressBar value={90} max={100} variant="yellow" label="ENERGY" showValue />
+              <CyberProgressBar value={75} max={100} variant="cyan" label={t('uiPreview.progress.hp')} showValue />
+              <CyberProgressBar value={30} max={100} variant="red" label={t('uiPreview.progress.shield')} showValue />
+              <CyberProgressBar value={90} max={100} variant="yellow" label={t('uiPreview.progress.energy')} showValue />
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <CyberText variant="label" color="cyan">Inputs</CyberText>
-            <CyberInput label="USERNAME" placeholder="Enter alias..." />
-            <CyberInput label="PASSWORD" type="password" placeholder="Enter key..." error="Invalid access key" />
+            <CyberText variant="label" color="cyan">{t('uiPreview.section.inputs')}</CyberText>
+            <CyberInput label={t('uiPreview.input.username')} placeholder={t('uiPreview.input.usernamePlaceholder')} />
+            <CyberInput label={t('uiPreview.input.password')} type="password" placeholder={t('uiPreview.input.passwordPlaceholder')} error={t('uiPreview.input.passwordError')} />
           </div>
 
           <div className="flex flex-col gap-2">
-            <CyberText variant="label" color="cyan">Glitch Text</CyberText>
+            <CyberText variant="label" color="cyan">{t('uiPreview.section.glitchText')}</CyberText>
             <div className="flex flex-col gap-2">
-              <CyberGlitchText text="SYSTEM COMPROMISED" color="red" className="text-xl" />
-              <CyberGlitchText text="UPLOADING VIRUS..." color="cyan" className="text-xl" />
+              <CyberGlitchText text={t('uiPreview.glitch.compromised')} color="red" className="text-xl" />
+              <CyberGlitchText text={t('uiPreview.glitch.uploading')} color="cyan" className="text-xl" />
             </div>
           </div>
 
@@ -439,16 +470,16 @@ export const Game = () => {
                   glow
                   className={isShortLandscape ? 'mb-1 text-4xl md:text-5xl' : 'mb-2'}
                 >
-                  SYSTEM FAILURE
+                  {t('gameOver.title')}
                 </CyberText>
                 <CyberText variant="h3" color="white" className={isShortLandscape ? 'mb-1 text-lg md:text-xl' : 'mb-2'}>
-                  FINAL SCORE: {score}
+                  {t('gameOver.finalScore', { score })}
                 </CyberText>
                 <CyberText variant="label" color="cyan" className={isShortLandscape ? 'mb-4' : 'mb-8'}>
-                  CREDITS COLLECTED: {credits}
+                  {t('gameOver.creditsCollected', { credits })}
                 </CyberText>
                 <CyberButton variant="primary" onClick={handleStartGame}>
-                  REBOOT SYSTEM
+                  {t('gameOver.reboot')}
                 </CyberButton>
               </CyberPanel>
             </div>
@@ -459,20 +490,20 @@ export const Game = () => {
       <button
         onClick={toggleFullscreen}
         className="absolute top-4 right-4 z-30 p-2 bg-black/50 clip-chamfer-sm text-white hover:bg-black/70 transition-colors border border-white/10"
-        aria-label="Toggle Fullscreen"
+        aria-label={t('aria.toggleFullscreen')}
       >
         {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
       </button>
 
       {isPortrait && !forceStart && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-cyber-bg text-white p-8 text-center bg-scanlines">
-          <CyberPanel variant="cyan" className="w-full max-w-md" contentClassName="text-center">
-            <CyberText variant="h2" color="cyan" glow className="mb-4">ROTATE DEVICE</CyberText>
+            <CyberPanel variant="cyan" className="w-full max-w-md" contentClassName="text-center">
+            <CyberText variant="h2" color="cyan" glow className="mb-4">{t('rotate.title')}</CyberText>
             <CyberText variant="body" color="neutral" className="mb-8">
-              This game is designed to be played in landscape mode for the best experience.
+              {t('rotate.body')}
             </CyberText>
             <CyberButton variant="ghost" onClick={() => setForceStart(true)}>
-              PLAY ANYWAY
+              {t('rotate.playAnyway')}
             </CyberButton>
           </CyberPanel>
         </div>
