@@ -26,6 +26,8 @@ import { BulletManager } from '../combat/BulletManager';
 import { DefaultWeapon } from '../combat/DefaultWeapon';
 import type { Weapon, WeaponId } from '../combat/Weapon';
 import { createWeaponById } from '../combat/weapons';
+import type { Language, TranslationKey } from '../../i18n/translations';
+import { translate } from '../../i18n/translate';
 import { WaveSystem } from '../waves/WaveSystem';
 import { DungeonManager, createDefaultWorldSizing } from '../world';
 import type { DungeonNavigationPath, DungeonStage } from '../world/DungeonManager';
@@ -69,6 +71,26 @@ export class GameEngine {
   weaponSlots: Array<Weapon | null> = [new DefaultWeapon(), null];
   activeWeaponIndex: 0 | 1 = 0;
 
+  language: Language = 'en';
+
+  setLanguage(language: Language) {
+    this.language = language;
+    for (const drop of this.weaponDrops) {
+      drop.weaponName = this.getWeaponDisplayName(drop.weaponId);
+    }
+  }
+
+  private weaponKey(id: WeaponId): TranslationKey {
+    if (id === 'default') return 'weapon.default';
+    if (id === 'bounce_gun') return 'weapon.bounce_gun';
+    const _exhaustive: never = id;
+    return _exhaustive;
+  }
+
+  private getWeaponDisplayName(id: WeaponId): string {
+    return translate(this.language, this.weaponKey(id));
+  }
+
   get projectiles(): Bullet[] {
     return this.bulletManager.all;
   }
@@ -77,8 +99,8 @@ export class GameEngine {
     return this.interactables.getOverlappingEntries(this.player.x, this.player.y, this.player.radius);
   }
 
-  getWeaponSlots(): Array<{ id: WeaponId; name: string } | null> {
-    return this.weaponSlots.map(w => w ? ({ id: w.id, name: w.name }) : null);
+  getWeaponSlots(): Array<WeaponId | null> {
+    return this.weaponSlots.map(w => w ? w.id : null);
   }
 
   switchWeapon(index: 0 | 1) {
@@ -101,7 +123,7 @@ export class GameEngine {
     if (prev) {
       const ox = this.player.x + (Math.random() - 0.5) * 40;
       const oy = this.player.y + (Math.random() - 0.5) * 40;
-      const drop = new WeaponDrop(ox, oy, nowMs, prev.id, prev.name);
+      const drop = new WeaponDrop(ox, oy, nowMs, prev.id, this.getWeaponDisplayName(prev.id));
       this.weaponDrops.push(drop);
       this.interactables.add(drop);
     }
@@ -811,7 +833,13 @@ export class GameEngine {
     this.interactables.add(health);
 
     const bounce = createWeaponById('bounce_gun');
-    const weaponDrop = new WeaponDrop(rewardCenterX + 120, rewardCenterY, nowMs, bounce.id, bounce.name);
+    const weaponDrop = new WeaponDrop(
+      rewardCenterX + 120,
+      rewardCenterY,
+      nowMs,
+      bounce.id,
+      this.getWeaponDisplayName(bounce.id),
+    );
     this.weaponDrops.push(weaponDrop);
     this.interactables.add(weaponDrop);
 
