@@ -156,6 +156,29 @@ Composition rules:
 - For overlays: `bg-black/60 backdrop-blur-sm` + centered `CyberPanel` is the default pattern.
 - Data labels should look “terminal-like”: `font-mono uppercase tracking-widest`.
 
+## i18n (EN/中文) technical spec
+
+This repo uses a lightweight, type-safe i18n layer.
+
+- Source of truth: `src/i18n/translations.ts`
+  - `en` defines the keyset (`TranslationKey = keyof typeof en`).
+  - `zh` must include **every** key in `en` (TypeScript enforces this).
+  - Keep keys stable (`section.name` style).
+
+- Translation API:
+  - `translate(language, key, vars?)` in `src/i18n/translate.ts` supports `{var}` interpolation.
+  - React usage: `useI18n()` from `src/i18n/react.tsx` provides `{ language, setLanguage, t }`.
+  - `I18nProvider` persists language in `localStorage` (`language`) and sets `<html lang>`.
+
+- UI rules:
+  - All **player-facing UI strings** must go through `t(...)` / `translate(...)`.
+  - **Debug panel stays hardcoded English** (do not translate debug UI).
+
+- Engine / canvas HUD rules:
+  - Canvas HUD text is rendered in `src/game/renderer/Renderer.ts` and uses `translate(engine.language, ...)`.
+  - React should call `engine.setLanguage(language)` when language changes.
+  - Avoid embedding localized names in core combat logic; keep IDs stable and translate at the boundary (UI / HUD).
+
 ## Cursor / Copilot rules
 
 - No Cursor rules found (`.cursorrules` or `.cursor/rules/`).
