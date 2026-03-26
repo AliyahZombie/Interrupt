@@ -1,1 +1,1 @@
-export type EffectKind = 'STUN' | 'POISON';
+export type EffectKind = 'STUN' | 'POISON' | 'BURN' | 'BLIND';

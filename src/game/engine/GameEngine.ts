@@ -1,4 +1,21 @@
-import { BaseEnemy, Bullet, Credit, HealthPickup, MeleeEnemy, Particle, Player, Portal, RangedEnemy, Tile } from '../Entities';
+import {
+  BaseEnemy,
+  BoomerElite,
+  Bullet,
+  Credit,
+  FlameShooterEnemy,
+  HealthPickup,
+  InteractableManager,
+  MeleeEnemy,
+  Particle,
+  Player,
+  PoisonShooterEnemy,
+  Portal,
+  RangedEnemy,
+  TankElite,
+  Tile,
+  WeaponDrop,
+} from '../Entities';
 import type { EffectKind } from '../effects/types';
 import { BounceSkill, DashSkill, Skill } from '../Skills';
 import { Renderer } from '../Renderer';
@@ -7,13 +24,15 @@ import type { Difficulty, DifficultyRules } from '../Difficulty';
 import { resolveCircleRect, resolveRectRect } from '../physics/Collisions';
 import { BulletManager } from '../combat/BulletManager';
 import { DefaultWeapon } from '../combat/DefaultWeapon';
-import type { Weapon } from '../combat/Weapon';
+import type { Weapon, WeaponId } from '../combat/Weapon';
+import { createWeaponById } from '../combat/weapons';
 import { WaveSystem } from '../waves/WaveSystem';
 import { DungeonManager, createDefaultWorldSizing } from '../world';
 import type { DungeonNavigationPath, DungeonStage } from '../world/DungeonManager';
-import type { Rect, WorldLayout } from '../world/types';
+import type { WorldLayout } from '../world/types';
 import type { JoystickData } from '../EngineTypes';
 import type { GameState } from '../entities/GameState';
+import { clamp } from '../entities/math';
 import {
   buildRoomOpenings,
   createCorridorWallTiles,
@@ -36,6 +55,8 @@ export class GameEngine {
 
   healthPickups: HealthPickup[] = [];
   portals: Portal[] = [];
+  weaponDrops: WeaponDrop[] = [];
+  private interactables = new InteractableManager();
 
   leftJoystick: JoystickData = { active: false, originX: 0, originY: 0, x: 0, y: 0, radius: 60, knobRadius: 25, touchId: null };
   rightJoystick: JoystickData = { active: false, originX: 0, originY: 0, x: 0, y: 0, radius: 60, knobRadius: 25, touchId: null };
@@ -45,10 +66,64 @@ export class GameEngine {
   activeSkillIndex: number | null = null;
 
   private bulletManager = new BulletManager();
-  weapon: Weapon = new DefaultWeapon();
+  weaponSlots: Array<Weapon | null> = [new DefaultWeapon(), null];
+  activeWeaponIndex: 0 | 1 = 0;
 
   get projectiles(): Bullet[] {
     return this.bulletManager.all;
+  }
+
+  get nearbyInteractables() {
+    return this.interactables.getOverlappingEntries(this.player.x, this.player.y, this.player.radius);
+  }
+
+  getWeaponSlots(): Array<{ id: WeaponId; name: string } | null> {
+    return this.weaponSlots.map(w => w ? ({ id: w.id, name: w.name }) : null);
+  }
+
+  switchWeapon(index: 0 | 1) {
+    if (index === this.activeWeaponIndex) return;
+    if (!this.weaponSlots[index]) return;
+    this.activeWeaponIndex = index;
+  }
+
+  pickupWeapon(weaponId: WeaponId, nowMs: number) {
+    const newWeapon = createWeaponById(weaponId);
+
+    const emptyIdx = this.weaponSlots.findIndex(w => !w);
+    if (emptyIdx >= 0) {
+      this.weaponSlots[emptyIdx] = newWeapon;
+      return;
+    }
+
+    const slotIdx = this.activeWeaponIndex;
+    const prev = this.weaponSlots[slotIdx];
+    if (prev) {
+      const ox = this.player.x + (Math.random() - 0.5) * 40;
+      const oy = this.player.y + (Math.random() - 0.5) * 40;
+      const drop = new WeaponDrop(ox, oy, nowMs, prev.id, prev.name);
+      this.weaponDrops.push(drop);
+      this.interactables.add(drop);
+    }
+
+    this.weaponSlots[slotIdx] = newWeapon;
+  }
+
+  interactWith(id: string) {
+    const it = this.interactables.findById(id);
+    if (!it) return false;
+    if (!it.isOverlappingCircle(this.player.x, this.player.y, this.player.radius)) return false;
+    if (it.interactionMode !== 'MANUAL') return false;
+
+    const now = performance.now();
+    if (it.kind === 'WEAPON_DROP' && it instanceof WeaponDrop) {
+      this.pickupWeapon(it.weaponId, now);
+      this.weaponDrops = this.weaponDrops.filter(w => w.id !== it.id);
+      this.interactables.removeById(it.id);
+      return true;
+    }
+
+    return false;
   }
 
   spawnBullet(bullet: Bullet) {
@@ -83,6 +158,18 @@ export class GameEngine {
 
   private combatWaveTarget: number = 0;
   private combatWavesCleared: number = 0;
+
+  private lastEliteWaveIndex: number = -1;
+
+  private pendingBoomerDeaths: Array<{ x: number; y: number; level: number }> = [];
+  private boomerDeathEmitters: Array<{
+    x: number;
+    y: number;
+    level: number;
+    nextAtMs: number;
+    volleysRemaining: number;
+    intervalMs: number;
+  }> = [];
 
   private visitedRoomIndices = new Set<number>();
 
@@ -363,6 +450,10 @@ export class GameEngine {
       this.player.dashTimeRemaining = 0;
     }
 
+    if (this.player.isKnockedBack) {
+      this.updateKnockbackWithCollisions(dt);
+    }
+
     if (!stunned && this.player.isDashing) {
       this.updateDashWithCollisions(dt);
       this.particles.push(new Particle(
@@ -394,13 +485,16 @@ export class GameEngine {
       const dx = this.rightJoystick.x - this.rightJoystick.originX;
       const dy = this.rightJoystick.y - this.rightJoystick.originY;
 
-      this.weapon.tryFire({
-        timeMs: time,
-        owner: this.player,
-        aimDx: dx,
-        aimDy: dy,
-        spawnBullet: (bullet) => this.spawnBullet(bullet),
-      });
+      const weapon = this.weaponSlots[this.activeWeaponIndex];
+      if (weapon) {
+        weapon.tryFire({
+          timeMs: time,
+          owner: this.player,
+          aimDx: dx,
+          aimDy: dy,
+          spawnBullet: (bullet) => this.spawnBullet(bullet),
+        });
+      }
     }
 
     this.bulletManager.updateAndCollideActors(dt, {
@@ -411,12 +505,58 @@ export class GameEngine {
       enemies: this.enemies,
       particles: this.particles,
       credits: this.credits,
-      onEnemyKilled: (enemy) => {
-        this.waveSystem.onEnemyKilled(1);
-        this.score += enemy instanceof MeleeEnemy ? 10 : 20;
-        this.onScoreChange?.(this.score, this.collectedCredits);
-      },
+      onEnemyKilled: (enemy) => this.handleEnemyKilled(enemy, time),
     });
+
+    if (this.pendingBoomerDeaths.length > 0) {
+      for (const d of this.pendingBoomerDeaths) {
+        const volleys = clamp(10 + 2 * (d.level - 1), 10, 16);
+        const intervalMs = clamp(62 - 3 * (d.level - 1), 38, 62);
+        this.boomerDeathEmitters.push({
+          x: d.x,
+          y: d.y,
+          level: d.level,
+          nextAtMs: time,
+          volleysRemaining: volleys,
+          intervalMs,
+        });
+      }
+      this.pendingBoomerDeaths = [];
+    }
+
+    if (this.boomerDeathEmitters.length > 0) {
+      for (let i = this.boomerDeathEmitters.length - 1; i >= 0; i--) {
+        const em = this.boomerDeathEmitters[i];
+        if (time < em.nextAtMs) continue;
+        if (em.volleysRemaining <= 0) {
+          this.boomerDeathEmitters.splice(i, 1);
+          continue;
+        }
+
+        const speed = 460 + 18 * (em.level - 1);
+        const life = 1700;
+        const dmg = 10 + 1.5 * (em.level - 1);
+        const blindMs = 3000 + 350 * (em.level - 1);
+        for (let k = 0; k < 12; k++) {
+          const a = (k / 12) * Math.PI * 2;
+          this.spawnBullet(new Bullet(
+            em.x,
+            em.y,
+            Math.cos(a) * speed,
+            Math.sin(a) * speed,
+            life,
+            time,
+            dmg,
+            false,
+            '#22c55e',
+            { radius: 7, effectKind: 'BLIND', effectDurationMs: blindMs }
+          ));
+        }
+
+        em.volleysRemaining -= 1;
+        em.nextAtMs += em.intervalMs;
+      }
+    }
 
     let cameraX = this.player.x - this.canvas.width / 2;
     let cameraY = this.player.y - this.canvas.height / 2;
@@ -448,14 +588,43 @@ export class GameEngine {
       }
     }
 
+    const worldIndex = this.dungeon.getWorldIndex();
+    const waveIndex = this.waveSystem.state.index;
+    const isLastCombatWave = stage === 'COMBAT' && this.combatWaveTarget > 0 && this.combatWavesCleared === this.combatWaveTarget - 1;
+
     for (const s of waveOut.spawns) {
       const enemyLevel = computeSpawnEnemyLevel({
-        worldIndex: this.dungeon.getWorldIndex(),
-        waveIndex: this.waveSystem.state.index,
+        worldIndex,
+        waveIndex,
         rng: Math.random,
       });
+
+      const eliteChance = clamp(0.02 + 0.01 * worldIndex + 0.004 * waveIndex, 0, 0.14);
+      const forceEliteThisWave = isLastCombatWave && this.lastEliteWaveIndex !== waveIndex;
+      const shouldSpawnElite = stage === 'COMBAT' && (forceEliteThisWave || (waveIndex > 0 && Math.random() < eliteChance));
+
+      if (shouldSpawnElite) {
+        const roll = Math.random();
+        const tankBias = clamp(0.42 + 0.06 * worldIndex + 0.04 * waveIndex, 0.42, 0.78);
+        const elite = roll < tankBias
+          ? new TankElite(s.x, s.y, enemyLevel)
+          : new BoomerElite(s.x, s.y, enemyLevel);
+        this.enemies.push(elite);
+        this.lastEliteWaveIndex = waveIndex;
+        continue;
+      }
+
       if (s.kind === 'RANGED') {
-        this.enemies.push(new RangedEnemy(s.x, s.y, enemyLevel));
+        const poisonChance = clamp(0.12 + 0.03 * worldIndex, 0.12, 0.24);
+        const flameChance = clamp(0.1 + 0.03 * worldIndex, 0.1, 0.22);
+        const r = Math.random();
+        if (r < poisonChance) {
+          this.enemies.push(new PoisonShooterEnemy(s.x, s.y, enemyLevel));
+        } else if (r < poisonChance + flameChance) {
+          this.enemies.push(new FlameShooterEnemy(s.x, s.y, enemyLevel));
+        } else {
+          this.enemies.push(new RangedEnemy(s.x, s.y, enemyLevel));
+        }
       } else {
         this.enemies.push(new MeleeEnemy(s.x, s.y, enemyLevel));
       }
@@ -477,7 +646,21 @@ export class GameEngine {
     };
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
-      this.enemies[i].update(dt, stateObj);
+      const e = this.enemies[i];
+      e.updateEffects(dt, time);
+      if (e.hp <= 0) {
+        this.enemies.splice(i, 1);
+        this.handleEnemyKilled(e, time);
+        continue;
+      }
+
+      if (e.hasEffect('STUN')) continue;
+
+      e.update(dt, stateObj);
+      if (e.hp <= 0) {
+        this.enemies.splice(i, 1);
+        this.handleEnemyKilled(e, time);
+      }
     }
 
     for (let i = this.credits.length - 1; i >= 0; i--) {
@@ -510,37 +693,34 @@ export class GameEngine {
       }
     }
 
-    if (stage === 'REWARD') {
-      for (let i = this.healthPickups.length - 1; i >= 0; i--) {
-        const h = this.healthPickups[i];
-        const dist = Math.hypot(this.player.x - h.x, this.player.y - h.y);
-        if (dist < this.player.radius + h.radius) {
-          this.player.hp = this.player.maxHp;
-          this.healthPickups.splice(i, 1);
-          this.dungeon.setHealCollected();
-          this.unlockDoorToPortal();
-          this.navigationPath = this.dungeon.getNavigationPath(this.player.x, this.player.y);
-          for (let k = 0; k < 6; k++) {
-            this.particles.push(new Particle(
-              h.x,
-              h.y,
-              (Math.random() - 0.5) * 260,
-              (Math.random() - 0.5) * 260,
-              0,
-              320,
-              '#22c55e'
-            ));
-          }
+    let portalTouched = false;
+    for (const it of [...this.interactables.all]) {
+      if (it.interactionMode !== 'AUTO') continue;
+      if (!it.isOverlappingCircle(this.player.x, this.player.y, this.player.radius)) continue;
+
+      if (it.kind === 'HEALTH_PICKUP' && it instanceof HealthPickup) {
+        if (stage !== 'REWARD') continue;
+        this.player.hp = this.player.maxHp;
+        this.healthPickups = this.healthPickups.filter(h => h.id !== it.id);
+        this.interactables.removeById(it.id);
+        this.dungeon.setHealCollected();
+        this.unlockDoorToPortal();
+        this.navigationPath = this.dungeon.getNavigationPath(this.player.x, this.player.y);
+        for (let k = 0; k < 6; k++) {
+          this.particles.push(new Particle(
+            it.x,
+            it.y,
+            (Math.random() - 0.5) * 260,
+            (Math.random() - 0.5) * 260,
+            0,
+            320,
+            '#22c55e'
+          ));
         }
       }
-    }
 
-    let portalTouched = false;
-    for (const p of this.portals) {
-      const dist = Math.hypot(this.player.x - p.x, this.player.y - p.y);
-      if (dist < this.player.radius + p.radius) {
+      if (it.kind === 'PORTAL') {
         portalTouched = true;
-        break;
       }
     }
 
@@ -609,6 +789,8 @@ export class GameEngine {
     this.credits = [];
     this.healthPickups = [];
     this.portals = [];
+    this.weaponDrops = [];
+    this.interactables.reset();
 
     const combat = this.dungeon.getCombatRect();
     const reward = this.dungeon.getRewardRect();
@@ -624,11 +806,20 @@ export class GameEngine {
 
     const rewardCenterX = reward.x + reward.width / 2;
     const rewardCenterY = reward.y + reward.height / 2;
-    this.healthPickups.push(new HealthPickup(rewardCenterX, rewardCenterY, nowMs));
+    const health = new HealthPickup(rewardCenterX, rewardCenterY, nowMs);
+    this.healthPickups.push(health);
+    this.interactables.add(health);
+
+    const bounce = createWeaponById('bounce_gun');
+    const weaponDrop = new WeaponDrop(rewardCenterX + 120, rewardCenterY, nowMs, bounce.id, bounce.name);
+    this.weaponDrops.push(weaponDrop);
+    this.interactables.add(weaponDrop);
 
     const portalCenterX = portal.x + portal.width / 2;
     const portalCenterY = portal.y + portal.height / 2;
-    this.portals.push(new Portal(portalCenterX, portalCenterY, nowMs));
+    const portalObj = new Portal(portalCenterX, portalCenterY, nowMs);
+    this.portals.push(portalObj);
+    this.interactables.add(portalObj);
 
     this.combatWaveTarget = Math.max(1, this.layout.combatWaveCount);
     this.combatWavesCleared = 0;
@@ -742,6 +933,32 @@ export class GameEngine {
     this.doorToPortal = null;
   }
 
+  private handleEnemyKilled(enemy: BaseEnemy, timeMs: number) {
+    this.waveSystem.onEnemyKilled(1);
+    if (enemy instanceof BoomerElite) {
+      this.pendingBoomerDeaths.push({ x: enemy.x, y: enemy.y, level: enemy.level });
+    }
+
+    this.score += enemy instanceof MeleeEnemy ? 10 : 20;
+    this.onScoreChange?.(this.score, this.collectedCredits);
+
+    if (Math.random() < 0.4) {
+      this.credits.push(new Credit(enemy.x, enemy.y, 10, timeMs));
+    }
+
+    for (let k = 0; k < 8; k++) {
+      this.particles.push(new Particle(
+        enemy.x,
+        enemy.y,
+        (Math.random() - 0.5) * 420,
+        (Math.random() - 0.5) * 420,
+        0,
+        420 + Math.random() * 240,
+        enemy.color,
+      ));
+    }
+  }
+
   private updateDashWithCollisions(dt: number) {
     let remaining = dt;
     while (remaining > 0) {
@@ -760,6 +977,29 @@ export class GameEngine {
       }
       remaining -= step;
       if (!this.player.isDashing) break;
+    }
+  }
+
+  private updateKnockbackWithCollisions(dt: number) {
+    let remaining = dt;
+    while (remaining > 0) {
+      const step = Math.min(remaining, 1 / 240);
+      this.player.updateKnockback(step, this.world.width, this.world.height);
+
+      let hitWall = false;
+      for (const tile of this.tiles) {
+        if (resolveCircleRect(this.player, tile)) {
+          hitWall = true;
+        }
+      }
+      if (hitWall) {
+        this.player.isKnockedBack = false;
+        this.player.knockbackTimeRemaining = 0;
+        break;
+      }
+
+      remaining -= step;
+      if (!this.player.isKnockedBack) break;
     }
   }
 

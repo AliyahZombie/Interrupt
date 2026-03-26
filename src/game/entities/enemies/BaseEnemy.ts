@@ -1,6 +1,18 @@
 import type { GameState } from '../GameState';
+import { EffectManager } from '../../effects/EffectManager';
+import { createBlindEffect, createBurnEffectKillable, createPoisonEffectKillable, createStunEffect } from '../../effects/effects';
+import type { EffectKind } from '../../effects/types';
 
 export abstract class BaseEnemy {
+  lastDamagedAtMs: number = -Infinity;
+
+  private effectManager = new EffectManager({
+    STUN: createStunEffect,
+    POISON: createPoisonEffectKillable,
+    BURN: createBurnEffectKillable,
+    BLIND: createBlindEffect,
+  });
+
   constructor(
     public x: number,
     public y: number,
@@ -13,6 +25,23 @@ export abstract class BaseEnemy {
   ) {}
 
   abstract update(dt: number, state: GameState): void;
+
+  applyEffect(kind: EffectKind, durationMs: number, timeMs: number) {
+    void timeMs;
+    this.effectManager.applyEffect(kind, durationMs);
+  }
+
+  hasEffect(kind: EffectKind): boolean {
+    return this.effectManager.has(kind);
+  }
+
+  getEffectRemainingMs(kind: EffectKind): number {
+    return this.effectManager.getRemainingMs(kind);
+  }
+
+  updateEffects(dt: number, timeMs: number) {
+    this.effectManager.update({ dt, timeMs }, this);
+  }
 
   draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
     ctx.shadowColor = this.color;

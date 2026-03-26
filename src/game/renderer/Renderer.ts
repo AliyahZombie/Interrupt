@@ -58,15 +58,29 @@ export class Renderer {
 
     engine.portals.forEach(p => p.draw(ctx, cameraX, cameraY, t));
     engine.healthPickups.forEach(h => h.draw(ctx, cameraX, cameraY, t));
+    engine.weaponDrops.forEach(w => w.draw(ctx, cameraX, cameraY, t));
     engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, t));
     engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
     engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY));
-    engine.projectiles.forEach(p => p.draw(ctx, cameraX, cameraY));
+
+    for (const projectile of engine.projectiles) {
+      if (!projectile.isPlayer) {
+        projectile.draw(ctx, cameraX, cameraY);
+      }
+    }
 
     if (!engine.gameOver) {
       engine.player.draw(ctx, screenPx, screenPy);
 
       this.drawPlayerEffects(engine, screenPx, screenPy, t);
+
+      this.drawBlindOverlay(engine, screenPx, screenPy, t);
+
+      for (const projectile of engine.projectiles) {
+        if (projectile.isPlayer) {
+          projectile.draw(ctx, cameraX, cameraY);
+        }
+      }
 
       if (engine.activeSkillIndex !== null && engine.skillJoystick.active) {
         const skill = engine.skills[engine.activeSkillIndex];
@@ -128,6 +142,78 @@ export class Renderer {
     }
 
     this.drawUI(engine, t);
+  }
+
+  private drawBlindOverlay(engine: GameEngine, screenPx: number, screenPy: number, timeSec: number) {
+    const { canvas, ctx } = this;
+    const player = engine.player;
+    const remainingMs = player.getEffectRemainingMs('BLIND');
+    if (remainingMs <= 0) return;
+
+    const durMs = 3000;
+    const strength = clamp(remainingMs / durMs, 0, 1);
+    const eased = strength * strength;
+
+    const baseRadius = Math.min(canvas.width, canvas.height) * 0.22;
+    const minRadius = Math.min(canvas.width, canvas.height) * 0.12;
+    const holeR = clamp(baseRadius - eased * (baseRadius - minRadius), minRadius, baseRadius);
+
+    ctx.save();
+
+    const dim = 0.45 + 0.45 * eased;
+    ctx.fillStyle = 'rgba(0, 0, 0, ' + dim + ')';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.globalCompositeOperation = 'destination-out';
+    const feather = holeR * 0.65;
+    const grad = ctx.createRadialGradient(screenPx, screenPy, holeR * 0.45, screenPx, screenPy, holeR + feather);
+    grad.addColorStop(0, 'rgba(0,0,0,1)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(screenPx, screenPy, holeR + feather, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'source-over';
+
+    const cyan = '#00f0ff';
+    const pulse = 0.65 + 0.35 * Math.sin(timeSec * 6.5);
+    ctx.save();
+    ctx.strokeStyle = withAlpha(cyan, 0.35 + 0.25 * pulse);
+    ctx.lineWidth = 2;
+    ctx.shadowColor = cyan;
+    ctx.shadowBlur = 16;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -timeSec * 120;
+    ctx.beginPath();
+    ctx.arc(screenPx, screenPy, holeR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.09;
+    ctx.fillStyle = '#ffffff';
+    const lineH = 3;
+    const drift = (timeSec * 120) % (lineH * 6);
+    for (let y = -lineH * 6 + drift; y < canvas.height + lineH * 6; y += lineH * 6) {
+      ctx.fillRect(0, y, canvas.width, lineH);
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = '#ffffff';
+    const grains = Math.floor((canvas.width * canvas.height) / 8000);
+    const seed = timeSec * 31.7;
+    for (let i = 0; i < grains; i++) {
+      const x = rand01(i * 19.1 + seed) * canvas.width;
+      const y = rand01(i * 7.3 + seed * 1.7) * canvas.height;
+      if (Math.hypot(x - screenPx, y - screenPy) < holeR * 0.9) continue;
+      ctx.fillRect(x, y, 1, 1);
+    }
+    ctx.restore();
+
+    ctx.restore();
   }
 
   private drawCyberGuidance(params: {
@@ -434,6 +520,30 @@ export class Renderer {
     ctx.fillStyle = '#06b6d4';
     ctx.fillText(`CREDITS: ${engine.collectedCredits}`, 20, 70);
 
+    const statuses: Array<{ label: string; color: string; remainingMs: number }> = [];
+    const blindLeft = player.getEffectRemainingMs('BLIND');
+    if (blindLeft > 0) statuses.push({ label: 'BLIND', color: '#00f0ff', remainingMs: blindLeft });
+    const stunLeft = player.getEffectRemainingMs('STUN');
+    if (stunLeft > 0) statuses.push({ label: 'STUN', color: '#eab308', remainingMs: stunLeft });
+    const poisonLeft = player.getEffectRemainingMs('POISON');
+    if (poisonLeft > 0) statuses.push({ label: 'POISON', color: '#22c55e', remainingMs: poisonLeft });
+    const burnLeft = player.getEffectRemainingMs('BURN');
+    if (burnLeft > 0) statuses.push({ label: 'BURN', color: '#f97316', remainingMs: burnLeft });
+
+    if (statuses.length > 0) {
+      ctx.save();
+      ctx.font = 'bold 12px "JetBrains Mono", monospace, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      let y = 90;
+      for (const s of statuses) {
+        ctx.fillStyle = s.color;
+        ctx.fillText(`${s.label}: ${(s.remainingMs / 1000).toFixed(1)}S`, 20, y);
+        y += 18;
+      }
+      ctx.restore();
+    }
+
     if (engine.debugFlags.showWaveDebug) {
       const wave = engine.waveSystem.state;
       const now = performance.now();
@@ -669,7 +779,8 @@ export class Renderer {
 
     const hasStun = player.hasEffect('STUN');
     const hasPoison = player.hasEffect('POISON');
-    if (!hasStun && !hasPoison) return;
+    const hasBurn = player.hasEffect('BURN');
+    if (!hasStun && !hasPoison && !hasBurn) return;
 
     ctx.save();
     ctx.translate(screenPx, screenPy);
@@ -708,6 +819,38 @@ export class Renderer {
         ctx.globalAlpha = a * 0.75;
         const s = 2 + (i % 2) * 2;
         ctx.fillRect(x, y, s, s);
+      }
+      ctx.restore();
+    }
+
+    if (hasBurn) {
+      const pulse = 0.5 + 0.5 * Math.sin(timeSec * 5.1 + 2.2);
+      const ember = '#fb923c';
+      const hot = '#f97316';
+
+      ctx.save();
+      ctx.globalAlpha = 0.18 + 0.18 * pulse;
+      ctx.strokeStyle = hot;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = ember;
+      ctx.shadowBlur = 18;
+
+      const pad = 9 + 3.0 * pulse;
+      const chamfer = 8;
+      drawChamferedRect(ctx, -w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2, chamfer);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      const count = 9;
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2 + timeSec * 2.0;
+        const rr = r + 10 + 4 * Math.sin(timeSec * 6.0 + i * 1.1);
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        ctx.globalAlpha = 0.35 + 0.25 * pulse;
+        ctx.fillStyle = i % 2 === 0 ? ember : hot;
+        ctx.fillRect(x - 1, y - 1, 3, 3);
       }
       ctx.restore();
     }

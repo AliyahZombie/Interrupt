@@ -1,10 +1,18 @@
-export class HealthPickup {
-  radius: number;
+import { Interactable } from './interactables/Interactable';
+
+export class HealthPickup extends Interactable {
+  readonly kind = 'HEALTH_PICKUP' as const;
+  readonly interactionMode = 'AUTO' as const;
+  readonly radius: number;
+  readonly name = 'HEALTH';
+
   constructor(
     public x: number,
     public y: number,
-    public spawnTime: number
+    public spawnTime: number,
+    id?: string,
   ) {
+    super(x, y, spawnTime, id);
     this.radius = 18;
   }
 

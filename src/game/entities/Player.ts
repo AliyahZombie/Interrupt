@@ -1,5 +1,5 @@
 import { EffectManager } from '../effects/EffectManager';
-import { createPoisonEffect, createStunEffect } from '../effects/effects';
+import { createBlindEffect, createBurnEffect, createPoisonEffect, createStunEffect } from '../effects/effects';
 import type { EffectKind } from '../effects/types';
 import { clamp } from './math';
 
@@ -10,9 +10,17 @@ export class Player {
   dashDy: number = 0;
   dashSpeed: number = 1600;
 
+  isKnockedBack: boolean = false;
+  knockbackTimeRemaining: number = 0;
+  knockbackDx: number = 0;
+  knockbackDy: number = 0;
+  knockbackSpeed: number = 1000;
+
   private effectManager = new EffectManager({
     STUN: createStunEffect,
     POISON: createPoisonEffect,
+    BURN: createBurnEffect,
+    BLIND: createBlindEffect,
   });
 
   shield: number = 0;
@@ -83,6 +91,47 @@ export class Player {
 
   isStunned(): boolean {
     return this.hasEffect('STUN');
+  }
+
+  isBlinded(): boolean {
+    return this.hasEffect('BLIND');
+  }
+
+  startKnockback(params: {
+    dx: number;
+    dy: number;
+    speed: number;
+    durationSec: number;
+  }) {
+    const { dx, dy, speed, durationSec } = params;
+    if (durationSec <= 0 || speed <= 0) return;
+    const len = Math.hypot(dx, dy);
+    const ndx = len <= 1e-6 ? 0 : dx / len;
+    const ndy = len <= 1e-6 ? 0 : dy / len;
+
+    this.isDashing = false;
+    this.dashTimeRemaining = 0;
+
+    this.isKnockedBack = true;
+    this.knockbackTimeRemaining = Math.max(this.knockbackTimeRemaining, durationSec);
+    this.knockbackDx = ndx;
+    this.knockbackDy = ndy;
+    this.knockbackSpeed = Math.max(this.knockbackSpeed, speed);
+  }
+
+  updateKnockback(dt: number, worldWidth: number, worldHeight: number) {
+    if (!this.isKnockedBack) return;
+    this.knockbackTimeRemaining -= dt;
+    this.x += this.knockbackDx * this.knockbackSpeed * dt;
+    this.y += this.knockbackDy * this.knockbackSpeed * dt;
+    this.x = Math.max(this.radius, Math.min(worldWidth - this.radius, this.x));
+    this.y = Math.max(this.radius, Math.min(worldHeight - this.radius, this.y));
+
+    if (this.knockbackTimeRemaining <= 0) {
+      this.isKnockedBack = false;
+      this.knockbackTimeRemaining = 0;
+      this.knockbackSpeed = 1000;
+    }
   }
 
   update(dt: number, worldWidth: number, worldHeight: number) {

@@ -1,5 +1,7 @@
 import type { Bullet, Player } from '../Entities';
 
+export type WeaponId = 'default' | 'bounce_gun';
+
 export interface WeaponFireContext {
   timeMs: number;
   owner: Player;
@@ -9,7 +11,7 @@ export interface WeaponFireContext {
 }
 
 export interface Weapon {
-  id: string;
+  id: WeaponId;
   name: string;
   damage: number;
   fireIntervalMs: number;

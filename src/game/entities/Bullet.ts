@@ -1,5 +1,17 @@
+import type { EffectKind } from '../effects/types';
+
+export interface BulletOptions {
+  radius?: number;
+  effectKind?: EffectKind;
+  effectDurationMs?: number;
+  bouncesRemaining?: number;
+}
+
 export class Bullet {
   public radius: number;
+  public effectKind?: EffectKind;
+  public effectDurationMs?: number;
+  public bouncesRemaining: number;
   constructor(
     public x: number,
     public y: number,
@@ -9,9 +21,13 @@ export class Bullet {
     public spawnTime: number,
     public damage: number,
     public isPlayer: boolean,
-    public color: string
+    public color: string,
+    options?: BulletOptions
   ) {
-    this.radius = isPlayer ? 5 : 6;
+    this.radius = options?.radius ?? (isPlayer ? 5 : 6);
+    this.effectKind = options?.effectKind;
+    this.effectDurationMs = options?.effectDurationMs;
+    this.bouncesRemaining = options?.bouncesRemaining ?? 0;
   }
 
   update(dt: number) {
@@ -24,7 +40,7 @@ export class Bullet {
     ctx.shadowBlur = 10;
     ctx.fillStyle = this.color;
     ctx.beginPath();
-    ctx.arc(this.x - cameraX, this.y - cameraY, this.isPlayer ? 5 : 6, 0, Math.PI * 2);
+    ctx.arc(this.x - cameraX, this.y - cameraY, this.radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.closePath();
     ctx.shadowBlur = 0;

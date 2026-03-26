@@ -138,3 +138,42 @@ export const resolveCircleRect = (
   }
   return false;
 };
+
+export interface CircleRectCollisionInfo {
+  nx: number;
+  ny: number;
+  overlap: number;
+}
+
+export const getCircleRectCollisionInfo = (circle: CircleBody, rect: Tile): CircleRectCollisionInfo | null => {
+  const radius = circle.radius;
+  const dx = circle.x - rect.x;
+  const dy = circle.y - rect.y;
+  const px = Math.max(-rect.width / 2, Math.min(rect.width / 2, dx));
+  const py = Math.max(-rect.height / 2, Math.min(rect.height / 2, dy));
+
+  const dist = Math.hypot(dx - px, dy - py);
+  if (dist >= radius) return null;
+
+  let nx = dx - px;
+  let ny = dy - py;
+  let len = Math.hypot(nx, ny);
+  let overlap = radius - dist;
+
+  if (len === 0) {
+    if (Math.abs(dx) > Math.abs(dy)) {
+      nx = Math.sign(dx) || 1;
+      ny = 0;
+      overlap = radius + rect.width / 2 - Math.abs(dx);
+    } else {
+      nx = 0;
+      ny = Math.sign(dy) || 1;
+      overlap = radius + rect.height / 2 - Math.abs(dy);
+    }
+    len = 1;
+  }
+
+  nx /= len;
+  ny /= len;
+  return { nx, ny, overlap };
+};

@@ -1,12 +1,19 @@
 import { getPortalSvgDataUrl } from '../assets/portalSvg';
+import { Interactable } from './interactables/Interactable';
 
-export class Portal {
-  radius: number;
+export class Portal extends Interactable {
+  readonly kind = 'PORTAL' as const;
+  readonly interactionMode = 'AUTO' as const;
+  readonly radius: number;
+  readonly name = 'PORTAL';
+
   constructor(
     public x: number,
     public y: number,
-    public spawnTime: number
+    public spawnTime: number,
+    id?: string,
   ) {
+    super(x, y, spawnTime, id);
     this.radius = 34;
   }
 

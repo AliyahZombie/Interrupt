@@ -1,17 +1,18 @@
 import { Bullet, type Player } from '../Entities';
 import type { Weapon, WeaponFireContext } from './Weapon';
 
-export class DefaultWeapon implements Weapon {
-  id: Weapon['id'] = 'default';
-  name = 'DEFAULT';
+export class BounceGun implements Weapon {
+  id: Weapon['id'] = 'bounce_gun';
+  name = 'BOUNCE GUN';
 
-  damage = 50;
-  fireIntervalMs = 150;
+  damage = 25;
+  fireIntervalMs = 100;
 
   private minAimDistance = 10;
   private bulletSpeed = 1000;
   private bulletLifeMs = 1500;
-  private bulletColor = '#eab308';
+  private bulletColor = '#06b6d4';
+  private maxBounces = 3;
 
   private lastShotAtMs = 0;
 
@@ -38,6 +39,7 @@ export class DefaultWeapon implements Weapon {
       this.damage,
       true,
       this.bulletColor,
+      { bouncesRemaining: this.maxBounces },
     ));
 
     this.lastShotAtMs = timeMs;

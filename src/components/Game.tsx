@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Maximize, Minimize, Bug } from 'lucide-react';
 import { GameEngine } from '../game/Engine';
-import { RangedEnemy, MeleeEnemy } from '../game/Entities';
+import { BoomerElite, MeleeEnemy, RangedEnemy, TankElite } from '../game/Entities';
+import type { NearbyInteractableEntry } from '../game/Entities';
 import type { Difficulty } from '../game/Difficulty';
+import type { WeaponId } from '../game/combat/Weapon';
 import { CyberButton, CyberPanel, CyberText, CyberBadge, CyberInput, CyberProgressBar, CyberGlitchText, CyberModal } from './ui';
 
 export const Game = () => {
@@ -19,6 +21,9 @@ export const Game = () => {
   const [showUIPreview, setShowUIPreview] = useState(false);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const [spawnLevelText, setSpawnLevelText] = useState('1');
+  const [weaponSlots, setWeaponSlots] = useState<Array<{ id: WeaponId; name: string } | null>>([null, null]);
+  const [activeWeaponIndex, setActiveWeaponIndex] = useState<0 | 1>(0);
+  const [nearbyDrops, setNearbyDrops] = useState<NearbyInteractableEntry[]>([]);
   const [debugFlags, setDebugFlags] = useState({
     stopSpawning: false,
     godMode: false,
@@ -93,6 +98,18 @@ export const Game = () => {
     };
   }, [isPortrait, forceStart]);
 
+  useEffect(() => {
+    if (gameState !== 'PLAYING') return;
+    const id = window.setInterval(() => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      setWeaponSlots(engine.getWeaponSlots());
+      setActiveWeaponIndex(engine.activeWeaponIndex);
+      setNearbyDrops(engine.nearbyInteractables);
+    }, 120);
+    return () => window.clearInterval(id);
+  }, [gameState]);
+
   const handleStartGame = () => {
     if (engineRef.current) {
       engineRef.current.startGame(difficulty);
@@ -149,19 +166,33 @@ export const Game = () => {
                     engineRef.current.enemies.push(new RangedEnemy(player.x + 200, player.y, level));
                   }
                 }}>SPAWN RANGED</CyberButton>
+                <CyberButton variant="primary" onClick={() => {
+                  if (engineRef.current) {
+                    const { player } = engineRef.current;
+                    const level = Math.max(1, Math.floor(Number.parseInt(spawnLevelText, 10) || 1));
+                    engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y, level));
+                  }
+                }}>SPAWN MELEE</CyberButton>
                  <CyberButton variant="primary" onClick={() => {
                    if (engineRef.current) {
                      const { player } = engineRef.current;
                      const level = Math.max(1, Math.floor(Number.parseInt(spawnLevelText, 10) || 1));
-                     engineRef.current.enemies.push(new MeleeEnemy(player.x + 200, player.y, level));
+                     engineRef.current.enemies.push(new TankElite(player.x + 240, player.y, level));
                    }
-                 }}>SPAWN MELEE</CyberButton>
+                 }}>SPAWN ELITE TANK</CyberButton>
+                 <CyberButton variant="primary" onClick={() => {
+                   if (engineRef.current) {
+                     const { player } = engineRef.current;
+                     const level = Math.max(1, Math.floor(Number.parseInt(spawnLevelText, 10) || 1));
+                     engineRef.current.enemies.push(new BoomerElite(player.x + 240, player.y, level));
+                   }
+                 }}>SPAWN ELITE BOOMER</CyberButton>
                  <CyberButton variant="primary" onClick={() => {
                    engineRef.current?.applyPlayerEffect('STUN', 3000);
                  }}>STUN 3S</CyberButton>
-               <CyberButton variant="primary" onClick={() => {
-                 engineRef.current?.applyPlayerEffect('POISON', 8000);
-               }}>POISON 8S</CyberButton>
+                <CyberButton variant="primary" onClick={() => {
+                  engineRef.current?.applyPlayerEffect('POISON', 8000);
+                }}>POISON 8S</CyberButton>
              </div>
            </div>
           
@@ -211,6 +242,67 @@ export const Game = () => {
           </div>
         </div>
       </CyberModal>
+
+      {gameState === 'PLAYING' && (
+        <div className="absolute inset-0 z-20 pointer-events-none">
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 w-44 pointer-events-auto">
+            <div className="flex flex-col gap-2">
+              {[0, 1].map((idx) => {
+                const slot = weaponSlots[idx];
+                const isActive = activeWeaponIndex === idx;
+                const isDisabled = !slot;
+                return (
+                  <CyberButton
+                    key={idx}
+                    variant={isActive ? 'primary' : 'ghost'}
+                    disabled={isDisabled}
+                    onClick={() => {
+                      const engine = engineRef.current;
+                      if (!engine) return;
+                      engine.switchWeapon(idx as 0 | 1);
+                      setActiveWeaponIndex(idx as 0 | 1);
+                    }}
+                    className={`w-full !px-3 !py-2 text-left ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <span className="flex items-start gap-2">
+                      <CyberBadge variant={isActive ? 'cyan' : 'neutral'}>{idx + 1}</CyberBadge>
+                      <span className="font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight">
+                        {slot ? slot.name : 'EMPTY'}
+                      </span>
+                    </span>
+                  </CyberButton>
+                );
+              })}
+            </div>
+          </div>
+
+          {nearbyDrops.length > 0 && (
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 w-72 pointer-events-auto z-40">
+              <div className="bg-black/40 backdrop-blur-sm border border-white/10 clip-chamfer-sm p-2">
+                <div className="flex flex-col gap-2 max-h-72 overflow-y-auto">
+                  {nearbyDrops.map((d) => (
+                    <CyberButton
+                      key={d.id}
+                      variant="ghost"
+                      onClick={() => {
+                        const engine = engineRef.current;
+                        if (!engine) return;
+                        engine.interactWith(d.id);
+                        setNearbyDrops(engine.nearbyInteractables);
+                        setWeaponSlots(engine.getWeaponSlots());
+                        setActiveWeaponIndex(engine.activeWeaponIndex);
+                      }}
+                      className="w-full !px-3 !py-2 text-left bg-black/20 hover:bg-black/30 border border-white/10"
+                    >
+                      <span className="font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight">{d.title}</span>
+                    </CyberButton>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* UI Overlays */}
       {gameState === 'START' && (
