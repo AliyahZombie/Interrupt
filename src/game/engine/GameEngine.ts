@@ -218,8 +218,7 @@ export class GameEngine {
 
   skipCurrentWave() {
     const now = performance.now();
-    const stage = this.dungeon.getStage();
-    if (stage === 'COMBAT' && !this.isCombatRoomFinished()) {
+    if (this.activeCombatRoomIndex !== null && !this.isCombatRoomFinished()) {
       this.combatWavesCleared = Math.min(this.combatWaveTarget, this.combatWavesCleared + 1);
     }
     this.waveSystem.skipCurrentWave(now);
@@ -235,8 +234,9 @@ export class GameEngine {
 
   private dungeon: DungeonManager;
   private layout: WorldLayout;
-  private doorToReward: Tile | null = null;
-  private doorToPortal: Tile | null = null;
+  private doorTilesByRoomIndex = new Map<number, Tile[]>();
+
+  private activeCombatRoomIndex: number | null = null;
 
   private combatWaveTarget: number = 0;
   private combatWavesCleared: number = 0;
@@ -254,6 +254,101 @@ export class GameEngine {
   }> = [];
 
   private visitedRoomIndices = new Set<number>();
+
+  private lockDoorsForRoom(roomIndex: number) {
+    const doors = this.doorTilesByRoomIndex.get(roomIndex);
+    if (!doors || doors.length === 0) return;
+    for (const d of doors) {
+      if (this.tiles.includes(d)) continue;
+      this.tiles.push(d);
+    }
+  }
+
+  private unlockDoorsForRoom(roomIndex: number) {
+    const doors = this.doorTilesByRoomIndex.get(roomIndex);
+    if (!doors || doors.length === 0) return;
+    const set = new Set(doors);
+    this.tiles = this.tiles.filter(t => !set.has(t));
+  }
+
+  private spawnRewardForRoom(roomIndex: number, nowMs: number) {
+    const room = this.layout.rooms[roomIndex];
+    if (!room || room.kind !== 'REWARD') return;
+    if (this.dungeon.isRewardRoomClaimed(roomIndex)) return;
+
+    const cx = room.rect.x + room.rect.width / 2;
+    const cy = room.rect.y + room.rect.height / 2;
+    const content = room.rewardContent ?? 'CREDIT';
+
+    if (content === 'HEAL') {
+      const health = new HealthPickup(cx, cy, nowMs);
+      this.healthPickups.push(health);
+      this.interactables.add(health);
+      this.dungeon.setRewardRoomClaimed(roomIndex);
+      return;
+    }
+
+    if (content === 'WEAPON') {
+      const candidates: WeaponId[] = ['bounce_gun', 'bow'];
+      const weaponId = candidates[Math.floor(Math.random() * candidates.length)];
+      const drop = new WeaponDrop(cx, cy, nowMs, weaponId, this.getWeaponDisplayName(weaponId));
+      this.weaponDrops.push(drop);
+      this.interactables.add(drop);
+      this.dungeon.setRewardRoomClaimed(roomIndex);
+      return;
+    }
+
+    const worldIndex = this.dungeon.getWorldIndex();
+    const count = Math.max(4, Math.min(12, 6 + worldIndex));
+    for (let i = 0; i < count; i++) {
+      const ox = (Math.random() - 0.5) * 90;
+      const oy = (Math.random() - 0.5) * 90;
+      this.credits.push(new Credit(cx + ox, cy + oy, 10, nowMs));
+    }
+    this.dungeon.setRewardRoomClaimed(roomIndex);
+  }
+
+  private startCombatInRoom(roomIndex: number, nowMs: number) {
+    if (this.dungeon.isCombatRoomCleared(roomIndex)) return;
+    if (this.activeCombatRoomIndex === roomIndex) return;
+
+    this.activeCombatRoomIndex = roomIndex;
+    this.lockDoorsForRoom(roomIndex);
+
+    const room = this.layout.rooms[roomIndex];
+    const target = room?.combatWaveCount ?? this.layout.combatWaveCount;
+    this.combatWaveTarget = Math.max(1, target);
+    this.combatWavesCleared = 0;
+    this.lastEliteWaveIndex = -1;
+
+    this.enemies = [];
+    this.pendingBoomerDeaths = [];
+    this.boomerDeathEmitters = [];
+
+    this.waveSystem.reset(nowMs, this.difficulty);
+  }
+
+  private updateCurrentRoomAndTriggers(nowMs: number) {
+    const roomIndex = this.dungeon.findRoomIndexAt(this.player.x, this.player.y);
+    if (roomIndex === null) return;
+
+    const changed = this.dungeon.setCurrentRoomIndex(roomIndex);
+    const room = this.layout.rooms[roomIndex];
+    if (!room) return;
+
+    if (changed && room.kind === 'REWARD') {
+      this.spawnRewardForRoom(roomIndex, nowMs);
+    }
+
+    if (room.kind === 'COMBAT' && !this.dungeon.isCombatRoomCleared(roomIndex)) {
+      this.startCombatInRoom(roomIndex, nowMs);
+    } else if (room.kind === 'COMBAT' && this.dungeon.isCombatRoomCleared(roomIndex)) {
+      this.unlockDoorsForRoom(roomIndex);
+      if (this.activeCombatRoomIndex === roomIndex) {
+        this.activeCombatRoomIndex = null;
+      }
+    }
+  }
 
   lastTime: number = performance.now();
   score: number = 0;
@@ -358,8 +453,8 @@ export class GameEngine {
     this.navigationPath = null;
     this.dungeon.resetRun();
     this.layout = this.dungeon.getLayout();
-    this.doorToReward = null;
-    this.doorToPortal = null;
+    this.doorTilesByRoomIndex = new Map();
+    this.activeCombatRoomIndex = null;
     this.combatWaveTarget = 0;
     this.combatWavesCleared = 0;
     this.visitedRoomIndices.clear();
@@ -740,9 +835,12 @@ export class GameEngine {
     let cameraY = this.player.y - this.canvas.height / 2;
 
     const prevPhase = this.waveSystem.state.phase;
-    const stage = this.dungeon.getStage();
-    const stopSpawningForStage = stage !== 'COMBAT' || this.isCombatRoomFinished();
-    const spawnRect = stage === 'COMBAT' && !this.isCombatRoomFinished() ? this.dungeon.getCombatRect() : undefined;
+    this.updateCurrentRoomAndTriggers(time);
+
+    const stopSpawningForStage = this.activeCombatRoomIndex === null || this.isCombatRoomFinished();
+    const spawnRect = this.activeCombatRoomIndex !== null && !this.isCombatRoomFinished()
+      ? this.layout.rooms[this.activeCombatRoomIndex]?.rect
+      : undefined;
 
     const waveOut = this.waveSystem.update({
       timeMs: time,
@@ -758,7 +856,7 @@ export class GameEngine {
       spawnRect,
     });
 
-    if (stage === 'COMBAT') {
+    if (this.activeCombatRoomIndex !== null) {
       if (waveOut.forcedAdvance) {
         this.combatWavesCleared = Math.min(this.combatWaveTarget, this.combatWavesCleared + 1);
       } else if (prevPhase === 'WAIT_CLEAR' && this.waveSystem.state.phase === 'INTERMISSION') {
@@ -768,7 +866,7 @@ export class GameEngine {
 
     const worldIndex = this.dungeon.getWorldIndex();
     const waveIndex = this.waveSystem.state.index;
-    const isLastCombatWave = stage === 'COMBAT' && this.combatWaveTarget > 0 && this.combatWavesCleared === this.combatWaveTarget - 1;
+    const isLastCombatWave = this.activeCombatRoomIndex !== null && this.combatWaveTarget > 0 && this.combatWavesCleared === this.combatWaveTarget - 1;
 
     for (const s of waveOut.spawns) {
       const enemyLevel = computeSpawnEnemyLevel({
@@ -779,7 +877,7 @@ export class GameEngine {
 
       const eliteChance = clamp(0.02 + 0.01 * worldIndex + 0.004 * waveIndex, 0, 0.14);
       const forceEliteThisWave = isLastCombatWave && this.lastEliteWaveIndex !== waveIndex;
-      const shouldSpawnElite = stage === 'COMBAT' && (forceEliteThisWave || (waveIndex > 0 && Math.random() < eliteChance));
+      const shouldSpawnElite = this.activeCombatRoomIndex !== null && (forceEliteThisWave || (waveIndex > 0 && Math.random() < eliteChance));
 
       if (shouldSpawnElite) {
         const roll = Math.random();
@@ -877,13 +975,9 @@ export class GameEngine {
       if (!it.isOverlappingCircle(this.player.x, this.player.y, this.player.radius)) continue;
 
       if (it.kind === 'HEALTH_PICKUP' && it instanceof HealthPickup) {
-        if (stage !== 'REWARD') continue;
         this.player.hp = this.player.maxHp;
         this.healthPickups = this.healthPickups.filter(h => h.id !== it.id);
         this.interactables.removeById(it.id);
-        this.dungeon.setHealCollected();
-        this.unlockDoorToPortal();
-        this.navigationPath = this.dungeon.getNavigationPath(this.player.x, this.player.y);
         for (let k = 0; k < 6; k++) {
           this.particles.push(new Particle(
             it.x,
@@ -946,18 +1040,24 @@ export class GameEngine {
     this.bulletManager.collideTiles(this.tiles, this.particles, (circle) => this.tileIndex.queryCircle(circle));
 
     const combatFinished = this.isCombatRoomFinished();
-    if (stage === 'COMBAT' && combatFinished && !this.dungeon.isCombatCleared()) {
-      this.dungeon.setCombatCleared();
-      this.unlockDoorToReward();
-      this.navigationPath = this.dungeon.getNavigationPath(this.player.x, this.player.y);
+    if (
+      this.activeCombatRoomIndex !== null &&
+      combatFinished &&
+      !this.dungeon.isCombatRoomCleared(this.activeCombatRoomIndex)
+    ) {
+      const idx = this.activeCombatRoomIndex;
+      this.dungeon.setCombatRoomCleared(idx);
+      this.unlockDoorsForRoom(idx);
+      this.activeCombatRoomIndex = null;
     }
 
-    this.dungeon.updateStage(this.player.x, this.player.y);
     this.navigationPath = this.dungeon.getNavigationPath(this.player.x, this.player.y);
 
     this.updateVisitedRooms(this.player.x, this.player.y);
 
-    if (this.dungeon.getStage() === 'PORTAL' && portalTouched) {
+    const currentRoomIndex = this.dungeon.getCurrentRoomIndex();
+    const currentRoom = this.layout.rooms[currentRoomIndex];
+    if (currentRoom?.kind === 'PORTAL' && portalTouched) {
       this.advanceWorld(time);
     }
 
@@ -983,54 +1083,32 @@ export class GameEngine {
     this.weaponDrops = [];
     this.interactables.reset();
 
-    const combat = this.dungeon.getCombatRect();
-    const reward = this.dungeon.getRewardRect();
-    const portal = this.dungeon.getPortalRect();
+    const startRoomIndex = this.dungeon.getStartRoomIndex();
+    const startRoom = this.layout.rooms[startRoomIndex];
+    if (startRoom) {
+      this.player.x = startRoom.rect.x + startRoom.rect.width / 2;
+      this.player.y = startRoom.rect.y + startRoom.rect.height / 2;
+    }
+    this.dungeon.setCurrentRoomIndex(startRoomIndex);
 
-    this.player.x = combat.x + combat.width * 0.35;
-    this.player.y = combat.y + combat.height / 2;
-
-    const { tiles, doorToReward, doorToPortal } = this.createDungeonTiles();
+    const { tiles, doorTilesByRoomIndex } = this.createDungeonTiles();
     this.tiles = tiles;
-    this.doorToReward = doorToReward;
-    this.doorToPortal = doorToPortal;
+    this.doorTilesByRoomIndex = doorTilesByRoomIndex;
 
-    const rewardCenterX = reward.x + reward.width / 2;
-    const rewardCenterY = reward.y + reward.height / 2;
-    const health = new HealthPickup(rewardCenterX, rewardCenterY, nowMs);
-    this.healthPickups.push(health);
-    this.interactables.add(health);
+    const portalRoomIndex = this.dungeon.getPortalRoomIndex();
+    const portalRoom = this.layout.rooms[portalRoomIndex];
+    if (portalRoom) {
+      const portalCenterX = portalRoom.rect.x + portalRoom.rect.width / 2;
+      const portalCenterY = portalRoom.rect.y + portalRoom.rect.height / 2;
+      const portalObj = new Portal(portalCenterX, portalCenterY, nowMs);
+      this.portals.push(portalObj);
+      this.interactables.add(portalObj);
+    }
 
-    const bounce = createWeaponById('bounce_gun');
-    const weaponDrop = new WeaponDrop(
-      rewardCenterX + 120,
-      rewardCenterY,
-      nowMs,
-      bounce.id,
-      this.getWeaponDisplayName(bounce.id),
-    );
-    this.weaponDrops.push(weaponDrop);
-    this.interactables.add(weaponDrop);
-
-    const bow = createWeaponById('bow');
-    const bowDrop = new WeaponDrop(
-      rewardCenterX - 120,
-      rewardCenterY,
-      nowMs,
-      bow.id,
-      this.getWeaponDisplayName(bow.id),
-    );
-    this.weaponDrops.push(bowDrop);
-    this.interactables.add(bowDrop);
-
-    const portalCenterX = portal.x + portal.width / 2;
-    const portalCenterY = portal.y + portal.height / 2;
-    const portalObj = new Portal(portalCenterX, portalCenterY, nowMs);
-    this.portals.push(portalObj);
-    this.interactables.add(portalObj);
-
-    this.combatWaveTarget = Math.max(1, this.layout.combatWaveCount);
+    this.activeCombatRoomIndex = null;
+    this.combatWaveTarget = 0;
     this.combatWavesCleared = 0;
+    this.lastEliteWaveIndex = -1;
 
     this.visitedRoomIndices.clear();
     this.updateVisitedRooms(this.player.x, this.player.y);
@@ -1038,6 +1116,7 @@ export class GameEngine {
   }
 
   getMinimapData(): {
+    worldIndex: number;
     bounds: { width: number; height: number };
     rooms: WorldLayout['rooms'];
     corridors: WorldLayout['corridors'];
@@ -1046,35 +1125,19 @@ export class GameEngine {
     objectivePos: { x: number; y: number } | null;
     objectiveStage: DungeonStage;
   } {
-    const stage = this.dungeon.getStage();
-    const combatCleared = this.dungeon.isCombatCleared();
-    const healCollected = this.dungeon.isHealCollected();
+    const portalRoomIndex = this.dungeon.getPortalRoomIndex();
+    const portalRoom = this.layout.rooms[portalRoomIndex];
+    const portalCenter = portalRoom
+      ? { x: portalRoom.rect.x + portalRoom.rect.width / 2, y: portalRoom.rect.y + portalRoom.rect.height / 2 }
+      : null;
 
-    const reward = this.dungeon.getRewardRect();
-    const portal = this.dungeon.getPortalRect();
-
-    const rewardCenter = { x: reward.x + reward.width / 2, y: reward.y + reward.height / 2 };
-    const portalCenter = { x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 };
-
-    let objectiveStage: DungeonStage = stage;
-    let objectivePos: { x: number; y: number } | null = null;
-
-    if (stage === 'COMBAT') {
-      objectiveStage = combatCleared ? 'REWARD' : 'COMBAT';
-      objectivePos = combatCleared ? rewardCenter : null;
-    } else if (stage === 'REWARD') {
-      objectiveStage = healCollected ? 'PORTAL' : 'REWARD';
-      if (healCollected) {
-        objectivePos = this.portals[0] ? { x: this.portals[0].x, y: this.portals[0].y } : portalCenter;
-      } else {
-        objectivePos = this.healthPickups[0] ? { x: this.healthPickups[0].x, y: this.healthPickups[0].y } : rewardCenter;
-      }
-    } else {
-      objectiveStage = 'PORTAL';
-      objectivePos = this.portals[0] ? { x: this.portals[0].x, y: this.portals[0].y } : portalCenter;
-    }
+    const objectiveStage: DungeonStage = 'PORTAL';
+    const objectivePos = this.portals[0]
+      ? { x: this.portals[0].x, y: this.portals[0].y }
+      : portalCenter;
 
     return {
+      worldIndex: this.dungeon.getWorldIndex(),
       bounds: { width: this.layout.bounds.width, height: this.layout.bounds.height },
       rooms: this.layout.rooms,
       corridors: this.layout.corridors,
@@ -1091,54 +1154,67 @@ export class GameEngine {
     this.buildWorld(nowMs);
   }
 
-  private createDungeonTiles(): { tiles: Tile[]; doorToReward: Tile; doorToPortal: Tile } {
+  private createDungeonTiles(): { tiles: Tile[]; doorTilesByRoomIndex: Map<number, Tile[]> } {
     const thickness = 70;
     const tiles: Tile[] = [];
 
-    const combat = this.dungeon.getCombatRect();
-    const reward = this.dungeon.getRewardRect();
-    const portal = this.dungeon.getPortalRect();
-    const corridor1 = this.layout.corridors[0];
-    const corridor2 = this.layout.corridors[1];
-
     tiles.push(...createOuterBoundsTiles(this.layout.bounds.width, this.layout.bounds.height, thickness));
 
-    const combatOpenings = buildRoomOpenings(combat, corridor1);
-    const rewardOpenings = {
-      ...buildRoomOpenings(reward, corridor1),
-      ...buildRoomOpenings(reward, corridor2),
+    type Openings = {
+      north?: { x: number; width: number };
+      south?: { x: number; width: number };
+      west?: { y: number; height: number };
+      east?: { y: number; height: number };
     };
-    const portalOpenings = buildRoomOpenings(portal, corridor2);
 
-    tiles.push(...createRoomWallTiles(combat, thickness, combatOpenings));
-    tiles.push(...createRoomWallTiles(reward, thickness, rewardOpenings));
-    tiles.push(...createRoomWallTiles(portal, thickness, portalOpenings));
+    const openingsByRoom = new Map<number, Openings>();
+    const ensureOpenings = (roomIndex: number): Openings => {
+      const existing = openingsByRoom.get(roomIndex);
+      if (existing) return existing;
+      const created: Openings = {};
+      openingsByRoom.set(roomIndex, created);
+      return created;
+    };
 
-    tiles.push(...createCorridorWallTiles(corridor1, thickness));
-    tiles.push(...createCorridorWallTiles(corridor2, thickness));
+    for (const conn of this.layout.connections) {
+      const roomA = this.layout.rooms[conn.roomA];
+      const roomB = this.layout.rooms[conn.roomB];
+      if (!roomA || !roomB) continue;
+
+      Object.assign(ensureOpenings(conn.roomA), buildRoomOpenings(roomA.rect, conn.corridor));
+      Object.assign(ensureOpenings(conn.roomB), buildRoomOpenings(roomB.rect, conn.corridor));
+    }
+
+    for (let i = 0; i < this.layout.rooms.length; i++) {
+      const room = this.layout.rooms[i];
+      tiles.push(...createRoomWallTiles(room.rect, thickness, openingsByRoom.get(i) ?? {}));
+    }
+
+    for (const corridor of this.layout.corridors) {
+      tiles.push(...createCorridorWallTiles(corridor, thickness));
+    }
 
     const doorWidth = 90;
-    const door1 = createDoorTile(corridor1, doorWidth, detectCorridorEdge(combat, corridor1));
-    const door2 = createDoorTile(corridor2, doorWidth, detectCorridorEdge(reward, corridor2));
+    const doorTilesByRoomIndex = new Map<number, Tile[]>();
+    const addDoor = (roomIndex: number, door: Tile) => {
+      const list = doorTilesByRoomIndex.get(roomIndex);
+      if (list) {
+        list.push(door);
+      } else {
+        doorTilesByRoomIndex.set(roomIndex, [door]);
+      }
+    };
 
-    tiles.push(door1);
-    tiles.push(door2);
+    for (const conn of this.layout.connections) {
+      const a = this.layout.rooms[conn.roomA];
+      const b = this.layout.rooms[conn.roomB];
+      if (!a || !b) continue;
+      const corridor = conn.corridor;
+      addDoor(conn.roomA, createDoorTile(corridor, doorWidth, detectCorridorEdge(a.rect, corridor)));
+      addDoor(conn.roomB, createDoorTile(corridor, doorWidth, detectCorridorEdge(b.rect, corridor)));
+    }
 
-    return { tiles, doorToReward: door1, doorToPortal: door2 };
-  }
-
-  private unlockDoorToReward() {
-    if (!this.doorToReward) return;
-    const door = this.doorToReward;
-    this.tiles = this.tiles.filter(t => t !== door);
-    this.doorToReward = null;
-  }
-
-  private unlockDoorToPortal() {
-    if (!this.doorToPortal) return;
-    const door = this.doorToPortal;
-    this.tiles = this.tiles.filter(t => t !== door);
-    this.doorToPortal = null;
+    return { tiles, doorTilesByRoomIndex };
   }
 
   private handleEnemyKilled(enemy: BaseEnemy, timeMs: number) {
@@ -1212,7 +1288,7 @@ export class GameEngine {
   }
 
   private isCombatRoomFinished(): boolean {
-    if (this.dungeon.getStage() !== 'COMBAT') return false;
+    if (this.activeCombatRoomIndex === null) return false;
     if (this.combatWaveTarget <= 0) return false;
     if (this.combatWavesCleared < this.combatWaveTarget) return false;
     return this.enemies.length === 0;

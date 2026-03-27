@@ -1,5 +1,5 @@
-import type { Rect, WorldLayout, WorldSizing } from './types';
-import { createLinearDungeonLayout } from './layout';
+import type { Rect, WorldLayout, WorldLayoutConnection, WorldSizing } from './types';
+import { createDungeonLayout } from './layout';
 
 export type DungeonStage = 'COMBAT' | 'REWARD' | 'PORTAL';
 
@@ -11,21 +11,22 @@ export class DungeonManager {
   private readonly sizing: WorldSizing;
   private worldIndex = 0;
   private layout: WorldLayout;
-  private stage: DungeonStage = 'COMBAT';
-  private combatCleared = false;
-  private healCollected = false;
+  private currentRoomIndex: number = 0;
+  private readonly clearedCombatRooms = new Set<number>();
+  private readonly claimedRewardRooms = new Set<number>();
 
   constructor(sizing: WorldSizing) {
     this.sizing = sizing;
-    this.layout = createLinearDungeonLayout(0, sizing);
+    this.layout = createDungeonLayout(0, sizing);
+    this.currentRoomIndex = this.getStartRoomIndex();
   }
 
   resetRun() {
     this.worldIndex = 0;
-    this.layout = createLinearDungeonLayout(this.worldIndex, this.sizing);
-    this.stage = 'COMBAT';
-    this.combatCleared = false;
-    this.healCollected = false;
+    this.layout = createDungeonLayout(this.worldIndex, this.sizing);
+    this.currentRoomIndex = this.getStartRoomIndex();
+    this.clearedCombatRooms.clear();
+    this.claimedRewardRooms.clear();
   }
 
   getWorldIndex(): number {
@@ -36,96 +37,120 @@ export class DungeonManager {
     return this.layout;
   }
 
-  getStage(): DungeonStage {
-    return this.stage;
+  getCurrentRoomIndex(): number {
+    return this.currentRoomIndex;
   }
 
-  getCombatRect(): Rect {
-    return this.getRoomRect('COMBAT');
+  setCurrentRoomIndex(index: number): boolean {
+    if (index === this.currentRoomIndex) return false;
+    this.currentRoomIndex = index;
+    return true;
   }
 
-  getRewardRect(): Rect {
-    return this.getRoomRect('REWARD');
-  }
-
-  getPortalRect(): Rect {
-    return this.getRoomRect('PORTAL');
-  }
-
-  isCombatCleared(): boolean {
-    return this.combatCleared;
-  }
-
-  isHealCollected(): boolean {
-    return this.healCollected;
-  }
-
-  setCombatCleared() {
-    this.combatCleared = true;
-  }
-
-  setHealCollected() {
-    this.healCollected = true;
-  }
-
-  updateStage(playerX: number, playerY: number) {
-    const reward = this.getRewardRect();
-    const portal = this.getPortalRect();
-
-    if (this.stage === 'COMBAT' && this.combatCleared) {
-      if (pointInRect(playerX, playerY, reward)) {
-        this.stage = 'REWARD';
-      }
-      return;
-    }
-
-    if (this.stage === 'REWARD' && this.healCollected) {
-      if (pointInRect(playerX, playerY, portal)) {
-        this.stage = 'PORTAL';
+  findRoomIndexAt(x: number, y: number): number | null {
+    for (let i = 0; i < this.layout.rooms.length; i++) {
+      if (pointInRect(x, y, this.layout.rooms[i].rect)) {
+        return i;
       }
     }
+    return null;
+  }
+
+  getRoom(index: number): WorldLayout['rooms'][number] | null {
+    const r = this.layout.rooms[index];
+    return r ?? null;
+  }
+
+  getStartRoomIndex(): number {
+    const idx = this.layout.rooms.findIndex(r => r.kind === 'HUB');
+    return idx >= 0 ? idx : 0;
+  }
+
+  getPortalRoomIndex(): number {
+    const idx = this.layout.rooms.findIndex(r => r.kind === 'PORTAL');
+    return idx >= 0 ? idx : 0;
+  }
+
+  isCombatRoomCleared(index: number): boolean {
+    return this.clearedCombatRooms.has(index);
+  }
+
+  setCombatRoomCleared(index: number) {
+    this.clearedCombatRooms.add(index);
+  }
+
+  isRewardRoomClaimed(index: number): boolean {
+    return this.claimedRewardRooms.has(index);
+  }
+
+  setRewardRoomClaimed(index: number) {
+    this.claimedRewardRooms.add(index);
   }
 
   advanceWorld() {
     this.worldIndex += 1;
-    this.layout = createLinearDungeonLayout(this.worldIndex, this.sizing);
-    this.stage = 'COMBAT';
-    this.combatCleared = false;
-    this.healCollected = false;
+    this.layout = createDungeonLayout(this.worldIndex, this.sizing);
+    this.currentRoomIndex = this.getStartRoomIndex();
+    this.clearedCombatRooms.clear();
+    this.claimedRewardRooms.clear();
   }
 
   getNavigationPath(playerX: number, playerY: number): DungeonNavigationPath | null {
-    const combat = this.getCombatRect();
-    const reward = this.getRewardRect();
-    const portal = this.getPortalRect();
+    const startRoomIndex = this.findRoomIndexAt(playerX, playerY) ?? this.currentRoomIndex;
+    const portalIndex = this.getPortalRoomIndex();
+    if (startRoomIndex === portalIndex) return null;
 
-    const corridor1 = this.layout.corridors[0];
-    const corridor1Mid = { x: corridor1.x + corridor1.width / 2, y: corridor1.y + corridor1.height / 2 };
-    const combatExit = roomConnectorPoint(combat, corridor1, 120);
-    const rewardCenter = { x: reward.x + reward.width / 2, y: reward.y + reward.height / 2 };
+    const adjacency = this.buildRoomAdjacency();
+    const pathRooms = bfsRoomPath(adjacency, startRoomIndex, portalIndex);
+    if (!pathRooms || pathRooms.length < 2) return null;
 
-    const corridor2 = this.layout.corridors[1];
-    const corridor2Mid = { x: corridor2.x + corridor2.width / 2, y: corridor2.y + corridor2.height / 2 };
-    const rewardExit = roomConnectorPoint(reward, corridor2, 120);
-    const portalCenter = { x: portal.x + portal.width / 2, y: portal.y + portal.height / 2 };
+    const points: { x: number; y: number }[] = [];
+    for (let i = 0; i < pathRooms.length - 1; i++) {
+      const aIdx = pathRooms[i];
+      const bIdx = pathRooms[i + 1];
+      const conn = this.findConnection(aIdx, bIdx);
+      if (!conn) continue;
 
-    if (this.stage === 'COMBAT' && this.combatCleared) {
-      return { points: trimPathToPlayer({ x: playerX, y: playerY }, [combatExit, corridor1Mid, rewardCenter]) };
+      const aRect = this.layout.rooms[aIdx]?.rect;
+      const bRect = this.layout.rooms[bIdx]?.rect;
+      if (!aRect || !bRect) continue;
+
+      const corridor = conn.corridor;
+      const corridorMid = { x: corridor.x + corridor.width / 2, y: corridor.y + corridor.height / 2 };
+      const aExit = roomConnectorPoint(aRect, corridor, 120);
+      const bCenter = { x: bRect.x + bRect.width / 2, y: bRect.y + bRect.height / 2 };
+
+      if (i === 0) {
+        points.push(aExit);
+      }
+      points.push(corridorMid);
+      points.push(bCenter);
     }
 
-    if (this.stage === 'REWARD' && this.healCollected) {
-      return { points: trimPathToPlayer({ x: playerX, y: playerY }, [rewardExit, corridor2Mid, portalCenter]) };
-    }
-
-    return null;
+    return { points: trimPathToPlayer({ x: playerX, y: playerY }, points) };
   }
 
-  private getRoomRect(kind: 'COMBAT' | 'REWARD' | 'PORTAL'): Rect {
-    const room = this.layout.rooms.find(r => r.kind === kind);
-    if (!room) {
-      return { x: 0, y: 0, width: 0, height: 0 };
+  private buildRoomAdjacency(): Map<number, number[]> {
+    const adj = new Map<number, number[]>();
+    for (let i = 0; i < this.layout.rooms.length; i++) adj.set(i, []);
+    for (const c of this.layout.connections) {
+      const a = c.roomA;
+      const b = c.roomB;
+      const aList = adj.get(a);
+      const bList = adj.get(b);
+      if (aList) aList.push(b);
+      if (bList) bList.push(a);
     }
-    return room.rect;
+    return adj;
+  }
+
+  private findConnection(a: number, b: number): WorldLayoutConnection | null {
+    for (const c of this.layout.connections) {
+      if ((c.roomA === a && c.roomB === b) || (c.roomA === b && c.roomB === a)) {
+        return c;
+      }
+    }
+    return null;
   }
 }
 
@@ -195,4 +220,36 @@ function projectPointToPolyline(
 
 function pointInRect(x: number, y: number, rect: Rect): boolean {
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+}
+
+function bfsRoomPath(adjacency: Map<number, number[]>, start: number, goal: number): number[] | null {
+  if (start === goal) return [start];
+  const q: number[] = [start];
+  const prev = new Map<number, number>();
+  const seen = new Set<number>([start]);
+
+  while (q.length > 0) {
+    const cur = q.shift();
+    if (cur === undefined) break;
+    const next = adjacency.get(cur) ?? [];
+    for (const n of next) {
+      if (seen.has(n)) continue;
+      seen.add(n);
+      prev.set(n, cur);
+      if (n === goal) {
+        const out: number[] = [goal];
+        let p = cur;
+        out.push(p);
+        while (p !== start) {
+          const pp = prev.get(p);
+          if (pp === undefined) break;
+          p = pp;
+          out.push(p);
+        }
+        return out.reverse();
+      }
+      q.push(n);
+    }
+  }
+  return null;
 }

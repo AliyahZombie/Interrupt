@@ -36,6 +36,7 @@ export const en = {
   'hud.auxShield': 'AUX.SHIELD',
   'hud.sysIntegrity': 'SYS.INTEGRITY',
   'hud.sysMap': 'SYS.MAP',
+  'hud.worldIndex': 'WORLD {index}',
 
   'status.blind': 'BLIND',
   'status.stun': 'STUN',
@@ -106,6 +107,7 @@ export const zh: Record<TranslationKey, string> = {
   'hud.auxShield': '辅助护盾',
   'hud.sysIntegrity': '系统完整性',
   'hud.sysMap': '系统地图',
+  'hud.worldIndex': '世界 {index}',
 
   'status.blind': '致盲',
   'status.stun': '眩晕',

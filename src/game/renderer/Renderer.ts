@@ -39,22 +39,7 @@ export class Renderer {
     const t = performance.now() / 1000;
     const nowMs = t * 1000;
 
-    if (engine.navigationPath) {
-      if (this.navStartedAtSec === null) {
-        this.navStartedAtSec = t;
-      }
-      const start = { x: engine.player.x, y: engine.player.y + engine.player.radius * 0.65 };
-      this.drawCyberGuidance({
-        start,
-        path: engine.navigationPath.points,
-        cameraX,
-        cameraY,
-        timeSec: t,
-        revealSec: Math.max(0, t - this.navStartedAtSec),
-      });
-    } else {
-      this.navStartedAtSec = null;
-    }
+    this.navStartedAtSec = null;
 
     engine.tiles.forEach(tile => tile.draw(ctx, cameraX, cameraY, t));
 
@@ -840,14 +825,30 @@ export class Renderer {
     ctx.fill();
     ctx.restore();
 
+    ctx.restore();
+
+    const language = engine.language ?? 'en';
+
     ctx.save();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
     ctx.font = 'bold 10px "JetBrains Mono", monospace, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(translate(engine.language ?? 'en', 'hud.sysMap'), box.x + 10, box.y + 8);
+    ctx.fillText(translate(language, 'hud.sysMap'), box.x + 10, box.y + 8);
     ctx.restore();
 
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.85)';
+    ctx.shadowBlur = 14;
+    ctx.font = 'bold 11px "JetBrains Mono", monospace, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    const worldLabel = translate(language, 'hud.worldIndex', { index: mm.worldIndex + 1 });
+    ctx.fillText(worldLabel, box.x, box.y - 4);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.fillText(worldLabel, box.x, box.y - 4);
     ctx.restore();
 
     ctx.save();

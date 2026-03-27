@@ -1,7 +1,9 @@
-import type { Rect, ViewportSize, WorldLayout, WorldSizing } from './types';
+import type { Rect, RewardContent, RoomKind, ViewportSize, WorldLayout, WorldLayoutConnection, WorldSizing } from './types';
 
-export function createLinearDungeonLayout(worldIndex: number, sizing: WorldSizing): WorldLayout {
+export function createDungeonLayout(worldIndex: number, sizing: WorldSizing): WorldLayout {
   const viewport = sizing.getViewportSize();
+
+  const hub = getHubRoomSize(viewport);
   const combat = getCombatRoomSize(viewport);
   const reward = getRewardRoomSize(viewport);
   const portal = getPortalRoomSize(viewport);
@@ -10,183 +12,288 @@ export function createLinearDungeonLayout(worldIndex: number, sizing: WorldSizin
   const corridorLen = 360;
   const corridorThick = 190;
 
-  const rng = mulberry32(0xC0FFEE + worldIndex * 9973);
-  const dirs: Direction[] = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+  const baseWaveCount = 3 + worldIndex;
+  const rng = Math.random;
 
-  const combatRect0: Rect = { x: 0, y: 0, width: combat.width, height: combat.height };
-  const d1 = dirs[Math.floor(rng() * dirs.length)];
-  const first = placeConnectedRoom(rng, combatRect0, reward.width, reward.height, d1, corridorLen, corridorThick);
-  const rewardRect0 = first.room;
-  const corridor1_0 = first.corridor;
+  const maxRoomW = Math.max(hub.width, combat.width, reward.width, portal.width);
+  const maxRoomH = Math.max(hub.height, combat.height, reward.height, portal.height);
+  const cellW = maxRoomW + corridorLen;
+  const cellH = maxRoomH + corridorLen;
 
-  let portalRect0: Rect = { x: 0, y: 0, width: portal.width, height: portal.height };
-  let corridor2_0: Rect = { x: 0, y: 0, width: corridorLen, height: corridorThick };
-  let ok = false;
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const d2 = dirs[Math.floor(rng() * dirs.length)];
-    if (d2 === oppositeDir(d1)) continue;
-    const second = placeConnectedRoom(rng, rewardRect0, portal.width, portal.height, d2, corridorLen, corridorThick);
-    const p = second.room;
-    const c = second.corridor;
-    if (
-      rectsOverlapExpanded(p, combatRect0, 140) ||
-      rectsOverlapExpanded(p, corridor1_0, 120) ||
-      rectsOverlapExpanded(c, combatRect0, 80)
-    ) {
-      continue;
+  type Node = {
+    id: string;
+    kind: RoomKind;
+    gx: number;
+    gy: number;
+    parentIndex: number | null;
+    rewardContent?: RewardContent;
+    combatWaveCount?: number;
+  };
+
+  const nodes: Node[] = [];
+  const occupied = new Set<string>();
+  const keyOf = (gx: number, gy: number) => `${gx},${gy}`;
+  const addNode = (node: Node) => {
+    nodes.push(node);
+    occupied.add(keyOf(node.gx, node.gy));
+  };
+
+  addNode({ id: 'ROOM_SAFE', kind: 'HUB', gx: 0, gy: 0, parentIndex: null });
+  addNode({ id: 'ROOM_BATTLE_0', kind: 'COMBAT', gx: 0, gy: -1, parentIndex: 0 });
+
+  const targetRoomCount = 4 + Math.floor(rng() * 4);
+  const dirs: Array<{ dx: number; dy: number }> = [
+    { dx: 0, dy: -1 },
+    { dx: 1, dy: 0 },
+    { dx: 0, dy: 1 },
+    { dx: -1, dy: 0 },
+  ];
+
+  for (let guard = 0; nodes.length < targetRoomCount && guard < 500; guard++) {
+    const parentIndex = 1 + Math.floor(rng() * Math.max(1, nodes.length - 1));
+    const parent = nodes[parentIndex];
+    const d = dirs[Math.floor(rng() * dirs.length)];
+    const gx = parent.gx + d.dx;
+    const gy = parent.gy + d.dy;
+    if (occupied.has(keyOf(gx, gy))) continue;
+    if (gx === 0 && gy === 0) continue;
+    if (gx === 0 && gy === -1) continue;
+    addNode({
+      id: `ROOM_${nodes.length}`,
+      kind: 'COMBAT',
+      gx,
+      gy,
+      parentIndex,
+    });
+  }
+
+  if (nodes.length < 4) {
+    const battle = nodes[1];
+    const candidates: Array<{ gx: number; gy: number }> = [
+      { gx: battle.gx, gy: battle.gy - 1 },
+      { gx: battle.gx + 1, gy: battle.gy },
+      { gx: battle.gx - 1, gy: battle.gy },
+      { gx: battle.gx, gy: battle.gy + 1 },
+      { gx: battle.gx, gy: battle.gy - 2 },
+    ];
+    for (const p of candidates) {
+      if (nodes.length >= 4) break;
+      if (occupied.has(keyOf(p.gx, p.gy))) continue;
+      addNode({
+        id: `ROOM_${nodes.length}`,
+        kind: 'COMBAT',
+        gx: p.gx,
+        gy: p.gy,
+        parentIndex: 1,
+      });
     }
-    portalRect0 = p;
-    corridor2_0 = c;
-    ok = true;
-    break;
-  }
-  if (!ok) {
-    const second = placeConnectedRoom(rng, rewardRect0, portal.width, portal.height, 'EAST', corridorLen, corridorThick);
-    portalRect0 = second.room;
-    corridor2_0 = second.corridor;
   }
 
-  const minX = Math.min(combatRect0.x, rewardRect0.x, portalRect0.x, corridor1_0.x, corridor2_0.x);
-  const minY = Math.min(combatRect0.y, rewardRect0.y, portalRect0.y, corridor1_0.y, corridor2_0.y);
-  const maxX = Math.max(
-    combatRect0.x + combatRect0.width,
-    rewardRect0.x + rewardRect0.width,
-    portalRect0.x + portalRect0.width,
-    corridor1_0.x + corridor1_0.width,
-    corridor2_0.x + corridor2_0.width,
-  );
-  const maxY = Math.max(
-    combatRect0.y + combatRect0.height,
-    rewardRect0.y + rewardRect0.height,
-    portalRect0.y + portalRect0.height,
-    corridor1_0.y + corridor1_0.height,
-    corridor2_0.y + corridor2_0.height,
-  );
+  const safe = nodes[0];
+  let portalIndex = nodes.length > 2 ? 2 : 1;
+  let bestDist = -1;
+  for (let i = 1; i < nodes.length; i++) {
+    if (i === 1 && nodes.length > 2) continue;
+    const n = nodes[i];
+    const d = Math.abs(n.gx - safe.gx) + Math.abs(n.gy - safe.gy);
+    if (d > bestDist) {
+      bestDist = d;
+      portalIndex = i;
+    }
+  }
+  nodes[portalIndex].kind = 'PORTAL';
+
+  const nonSafeIndices: number[] = [];
+  for (let i = 1; i < nodes.length; i++) {
+    if (i === portalIndex) continue;
+    if (i === 1) continue;
+    nonSafeIndices.push(i);
+  }
+  if (nonSafeIndices.length > 0) {
+    const rewardCount = rng() < 0.55 ? 2 : 1;
+    for (let k = 0; k < rewardCount; k++) {
+      const idx = nonSafeIndices[Math.floor(rng() * nonSafeIndices.length)];
+      nodes[idx].kind = 'REWARD';
+    }
+  }
+
+  if (!nodes.some(n => n.kind === 'REWARD')) {
+    const fallbackIdx = nonSafeIndices.length > 0
+      ? nonSafeIndices[Math.floor(rng() * nonSafeIndices.length)]
+      : (nodes.length > 3 ? 3 : 1);
+    if (fallbackIdx !== portalIndex && fallbackIdx !== 0) {
+      nodes[fallbackIdx].kind = 'REWARD';
+    }
+  }
+
+  for (const n of nodes) {
+    if (n.kind === 'REWARD') {
+      const r = rng();
+      n.rewardContent = r < 1 / 3 ? 'CREDIT' : r < 2 / 3 ? 'HEAL' : 'WEAPON';
+    }
+    if (n.kind === 'COMBAT') {
+      const bonus = rng() < 0.25 ? 1 : 0;
+      n.combatWaveCount = Math.max(1, baseWaveCount + bonus);
+    }
+  }
+
+  const roomRects0: Rect[] = nodes.map((n) => {
+    const size = n.kind === 'HUB'
+      ? hub
+      : n.kind === 'COMBAT'
+        ? combat
+        : n.kind === 'REWARD'
+          ? reward
+          : portal;
+    const x = Math.round(n.gx * cellW + (cellW - size.width) / 2);
+    const y = Math.round(n.gy * cellH + (cellH - size.height) / 2);
+    return { x, y, width: size.width, height: size.height };
+  });
+
+  const edges: Array<{ a: number; b: number }> = [];
+  const edgeKey = (a: number, b: number) => a < b ? `${a}-${b}` : `${b}-${a}`;
+  const edgeSet = new Set<string>();
+  const addEdge = (a: number, b: number) => {
+    if (a === 0 || b === 0) {
+      const other = a === 0 ? b : a;
+      if (other !== 1) return;
+    }
+    const k = edgeKey(a, b);
+    if (edgeSet.has(k)) return;
+    edgeSet.add(k);
+    edges.push({ a, b });
+  };
+
+  for (let i = 1; i < nodes.length; i++) {
+    const p = nodes[i].parentIndex;
+    if (p === null) continue;
+    addEdge(i, p);
+  }
+
+  const byPos = new Map<string, number>();
+  for (let i = 0; i < nodes.length; i++) {
+    byPos.set(keyOf(nodes[i].gx, nodes[i].gy), i);
+  }
+
+  for (let i = 1; i < nodes.length; i++) {
+    const n = nodes[i];
+    for (const d of dirs) {
+      const j = byPos.get(keyOf(n.gx + d.dx, n.gy + d.dy));
+      if (j === undefined) continue;
+      if (j === 0) continue;
+      if (j === i) continue;
+      if (rng() < 0.35) {
+        addEdge(i, j);
+      }
+    }
+  }
+
+  const connections0: WorldLayoutConnection[] = edges.map((e, idx) => {
+    const a = roomRects0[e.a];
+    const b = roomRects0[e.b];
+    const corridor = buildCorridorBetweenRooms(a, b, corridorThick);
+    return { id: `CONN_${idx}`, roomA: e.a, roomB: e.b, corridor };
+  });
+
+  const rectsForBounds: Rect[] = [...roomRects0, ...connections0.map(c => c.corridor)];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const r of rectsForBounds) {
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.width);
+    maxY = Math.max(maxY, r.y + r.height);
+  }
 
   const shiftX = padding - minX;
   const shiftY = padding - minY;
 
-  const combatRect = shiftRect(combatRect0, shiftX, shiftY);
-  const rewardRect = shiftRect(rewardRect0, shiftX, shiftY);
-  const portalRect = shiftRect(portalRect0, shiftX, shiftY);
-  const corridor1: Rect = shiftRect(corridor1_0, shiftX, shiftY);
-  const corridor2: Rect = shiftRect(corridor2_0, shiftX, shiftY);
+  const rooms = nodes.map((n, i) => ({
+    id: n.id,
+    kind: n.kind,
+    rect: shiftRect(roomRects0[i], shiftX, shiftY),
+    rewardContent: n.rewardContent,
+    combatWaveCount: n.combatWaveCount,
+  }));
 
+  const connections = connections0.map((c) => ({
+    ...c,
+    corridor: shiftRect(c.corridor, shiftX, shiftY),
+  }));
+
+  const corridors = connections.map(c => c.corridor);
   const worldWidth = roundUpTo((maxX - minX) + padding * 2, 50);
   const worldHeight = roundUpTo((maxY - minY) + padding * 2, 50);
 
-  const waveCount = 3 + worldIndex;
-  const layout: WorldLayout = {
+  return {
     id: `WORLD_${worldIndex}`,
     index: worldIndex,
     bounds: { width: worldWidth, height: worldHeight },
-    rooms: [
-      { kind: 'COMBAT', rect: combatRect },
-      { kind: 'REWARD', rect: rewardRect },
-      { kind: 'PORTAL', rect: portalRect },
-    ],
-    corridors: [corridor1, corridor2],
-    combatWaveCount: waveCount,
+    rooms,
+    corridors,
+    connections,
+    combatWaveCount: baseWaveCount,
   };
-  return layout;
 }
 
-function oppositeDir(dir: Direction): Direction {
-  if (dir === 'NORTH') return 'SOUTH';
-  if (dir === 'SOUTH') return 'NORTH';
-  if (dir === 'EAST') return 'WEST';
-  return 'EAST';
+export function createLinearDungeonLayout(worldIndex: number, sizing: WorldSizing): WorldLayout {
+  return createDungeonLayout(worldIndex, sizing);
 }
 
-type Direction = 'NORTH' | 'EAST' | 'SOUTH' | 'WEST';
+function buildCorridorBetweenRooms(a: Rect, b: Rect, thickness: number): Rect {
+  const halfT = thickness / 2;
+  const aCx = a.x + a.width / 2;
+  const aCy = a.y + a.height / 2;
+  const bCx = b.x + b.width / 2;
+  const bCy = b.y + b.height / 2;
 
-function placeConnectedRoom(
-  rng: () => number,
-  base: Rect,
-  roomW: number,
-  roomH: number,
-  dir: Direction,
-  corridorLen: number,
-  corridorThick: number,
-): { room: Rect; corridor: Rect } {
-  const baseCx = base.x + base.width / 2;
-  const baseCy = base.y + base.height / 2;
-  const room: Rect = { x: 0, y: 0, width: roomW, height: roomH };
-  const halfThick = corridorThick / 2;
+  const horizontal = Math.abs(aCx - bCx) >= Math.abs(aCy - bCy);
+  if (horizontal) {
+    const left = a.x < b.x ? a : b;
+    const right = a.x < b.x ? b : a;
 
-  if (dir === 'EAST' || dir === 'WEST') {
-    const shiftMax = Math.max(0, Math.min((base.height - corridorThick) / 2, (roomH - corridorThick) / 2, 260));
-    const shift = (rng() * 2 - 1) * shiftMax;
-    room.y = Math.round(baseCy - roomH / 2 + shift);
-    room.x = dir === 'EAST'
-      ? Math.round(base.x + base.width + corridorLen)
-      : Math.round(base.x - corridorLen - roomW);
+    const overlapTop = Math.max(left.y, right.y);
+    const overlapBottom = Math.min(left.y + left.height, right.y + right.height);
+    const cy = Math.round((overlapTop + overlapBottom) / 2);
 
-    const overlapTop = Math.max(base.y, room.y);
-    const overlapBottom = Math.min(base.y + base.height, room.y + roomH);
-    const minCy = overlapTop + halfThick;
-    const maxCy = overlapBottom - halfThick;
-    const cy = minCy > maxCy
-      ? Math.round((minCy + maxCy) / 2)
-      : Math.round(minCy + (maxCy - minCy) * rng());
-
-    const corridorX = dir === 'EAST' ? base.x + base.width : room.x + roomW;
-    const corridor: Rect = {
-      x: Math.round(corridorX),
-      y: Math.round(cy - corridorThick / 2),
-      width: corridorLen,
-      height: corridorThick,
+    const x = Math.round(left.x + left.width);
+    const width = Math.max(50, Math.round(right.x - x));
+    return {
+      x,
+      y: Math.round(cy - halfT),
+      width,
+      height: thickness,
     };
-    return { room, corridor };
   }
 
-  const shiftMax = Math.max(0, Math.min((base.width - corridorThick) / 2, (roomW - corridorThick) / 2, 320));
-  const shift = (rng() * 2 - 1) * shiftMax;
-  room.x = Math.round(baseCx - roomW / 2 + shift);
-  room.y = dir === 'SOUTH'
-    ? Math.round(base.y + base.height + corridorLen)
-    : Math.round(base.y - corridorLen - roomH);
+  const top = a.y < b.y ? a : b;
+  const bottom = a.y < b.y ? b : a;
 
-  const overlapLeft = Math.max(base.x, room.x);
-  const overlapRight = Math.min(base.x + base.width, room.x + roomW);
-  const minCx = overlapLeft + halfThick;
-  const maxCx = overlapRight - halfThick;
-  const cx = minCx > maxCx
-    ? Math.round((minCx + maxCx) / 2)
-    : Math.round(minCx + (maxCx - minCx) * rng());
+  const overlapLeft = Math.max(top.x, bottom.x);
+  const overlapRight = Math.min(top.x + top.width, bottom.x + bottom.width);
+  const cx = Math.round((overlapLeft + overlapRight) / 2);
 
-  const corridorY = dir === 'SOUTH' ? base.y + base.height : room.y + roomH;
-  const corridor: Rect = {
-    x: Math.round(cx - corridorThick / 2),
-    y: Math.round(corridorY),
-    width: corridorThick,
-    height: corridorLen,
+  const y = Math.round(top.y + top.height);
+  const height = Math.max(50, Math.round(bottom.y - y));
+  return {
+    x: Math.round(cx - halfT),
+    y,
+    width: thickness,
+    height,
   };
-  return { room, corridor };
 }
 
 function shiftRect(rect: Rect, dx: number, dy: number): Rect {
   return { x: rect.x + dx, y: rect.y + dy, width: rect.width, height: rect.height };
 }
 
-function rectsOverlapExpanded(a: Rect, b: Rect, pad: number): boolean {
-  return !(
-    a.x + a.width + pad < b.x - pad ||
-    a.x - pad > b.x + b.width + pad ||
-    a.y + a.height + pad < b.y - pad ||
-    a.y - pad > b.y + b.height + pad
-  );
-}
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+function getHubRoomSize(viewport: ViewportSize): { width: number; height: number } {
+  const base = getRewardRoomSize(viewport);
+  const width = roundUpTo(clamp(base.width + 80, 720, 1120), 50);
+  const height = roundUpTo(clamp(base.height + 60, 520, 820), 50);
+  return { width, height };
 }
 
 function getCombatRoomSize(viewport: ViewportSize): { width: number; height: number } {

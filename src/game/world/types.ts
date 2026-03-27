@@ -1,5 +1,7 @@
 export type RoomKind = 'HUB' | 'COMBAT' | 'REWARD' | 'PORTAL';
 
+export type RewardContent = 'CREDIT' | 'HEAL' | 'WEAPON';
+
 export interface Rect {
   x: number;
   y: number;
@@ -13,8 +15,19 @@ export interface WorldBounds {
 }
 
 export interface WorldLayoutRoom {
+  id: string;
   kind: RoomKind;
   rect: Rect;
+
+  rewardContent?: RewardContent;
+  combatWaveCount?: number;
+}
+
+export interface WorldLayoutConnection {
+  id: string;
+  roomA: number;
+  roomB: number;
+  corridor: Rect;
 }
 
 export interface WorldLayout {
@@ -23,6 +36,7 @@ export interface WorldLayout {
   bounds: WorldBounds;
   rooms: WorldLayoutRoom[];
   corridors: Rect[];
+  connections: WorldLayoutConnection[];
   combatWaveCount: number;
 }
 
