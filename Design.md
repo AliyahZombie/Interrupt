@@ -26,6 +26,7 @@ This separation keeps React focused on UI/UX, while gameplay code stays determin
 - `src/game/combat/BulletManager.ts`: Bullet lifecycle + collisions (bullet vs actors + bullet vs tiles).
 - `src/game/waves/WaveSystem.ts`: Wave/spawn state machine. Outputs spawn requests consumed by the engine.
 - `src/game/physics/Collisions.ts`: Collision/resolution helpers for circle-rect and rect-rect.
+- `src/game/physics/TileSpatialIndex.ts`: Uniform-grid spatial index for tiles (broadphase candidate queries).
 - `src/game/Difficulty.ts`: Difficulty rules (`Difficulty`, `DifficultyRules`, `getDifficultyRules`).
 
 ## 3. Core Modules (核心模块)
@@ -37,6 +38,10 @@ The React layer is a host/controller for the canvas engine:
 - Wires callbacks from engine → React state:
   - `engine.onStateChange?: (state: 'START' | 'PLAYING' | 'GAME_OVER') => void`
   - `engine.onScoreChange?: (score: number, credits: number) => void`
+- Subscribes to a small **engine-owned UI snapshot** via `useSyncExternalStore`:
+  - `engine.subscribeUi(listener): () => void`
+  - `engine.getUiSnapshot(): EngineUiSnapshot`
+  - Used for overlay state that must stay in sync with the engine (weapon slots, active weapon, nearby interactables).
 - Renders overlays (START / GAME_OVER / ROTATE DEVICE) and a debug modal.
 
 React is intentionally not part of the frame-by-frame simulation; the engine loop runs independently and only emits coarse-grained state changes.
@@ -49,6 +54,7 @@ React is intentionally not part of the frame-by-frame simulation; the engine loo
   - right joystick (aiming/shooting)
   - skill joystick (directional skill aim)
 - **Main loop**: `requestAnimationFrame` → compute `dt` → `update(dt, time)` → `renderer.draw(this)`.
+  - `dt` is clamped (max 50ms) to prevent large frame spikes from destabilizing movement/collisions.
 - **State ownership**:
   - `player: Player`
   - entity collections: `projectiles: Bullet[]`, `enemies: BaseEnemy[]`, `particles: Particle[]`, `credits: Credit[]`, `tiles: Tile[]`
@@ -60,6 +66,7 @@ React is intentionally not part of the frame-by-frame simulation; the engine loo
 - **Collisions & resolution**:
   - projectile vs enemy/player uses distance checks
   - tile collisions use `resolveRectRect` / `resolveCircleRect` from `physics/Collisions.ts`
+  - tile broadphase uses `TileSpatialIndex` to query candidate tile indices while preserving deterministic tile-order semantics
 
 The engine also owns a `WaveSystem` instance and converts its outputs into concrete enemy instances.
 

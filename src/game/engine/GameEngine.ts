@@ -7,6 +7,7 @@ import {
   HealthPickup,
   InteractableManager,
   MeleeEnemy,
+  type NearbyInteractableEntry,
   Particle,
   Player,
   PoisonShooterEnemy,
@@ -22,6 +23,7 @@ import { Renderer } from '../Renderer';
 import { getDifficultyRules } from '../Difficulty';
 import type { Difficulty, DifficultyRules } from '../Difficulty';
 import { resolveCircleRect, resolveRectRect } from '../physics/Collisions';
+import { TileSpatialIndex } from '../physics/TileSpatialIndex';
 import { BulletManager } from '../combat/BulletManager';
 import { DefaultWeapon } from '../combat/DefaultWeapon';
 import type { Weapon, WeaponId } from '../combat/Weapon';
@@ -46,6 +48,12 @@ import {
 } from './dungeonTiles';
 import { computeSpawnEnemyLevel } from './spawnLevels';
 
+export interface EngineUiSnapshot {
+  weaponSlots: Array<WeaponId | null>;
+  activeWeaponIndex: 0 | 1;
+  nearbyInteractables: NearbyInteractableEntry[];
+}
+
 export class GameEngine {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -59,6 +67,17 @@ export class GameEngine {
   portals: Portal[] = [];
   weaponDrops: WeaponDrop[] = [];
   private interactables = new InteractableManager();
+
+  private readonly tileIndex = new TileSpatialIndex({ cellSize: 128, bigTileMaxCells: 64 });
+
+  private readonly uiListeners = new Set<() => void>();
+  private uiSnapshot: EngineUiSnapshot = {
+    weaponSlots: [null, null],
+    activeWeaponIndex: 0,
+    nearbyInteractables: [],
+  };
+  private uiWeaponSig = '';
+  private uiInteractablesSig = '';
 
   leftJoystick: JoystickData = { active: false, originX: 0, originY: 0, x: 0, y: 0, radius: 60, knobRadius: 25, touchId: null };
   rightJoystick: JoystickData = { active: false, originX: 0, originY: 0, x: 0, y: 0, radius: 60, knobRadius: 25, touchId: null };
@@ -78,6 +97,7 @@ export class GameEngine {
     for (const drop of this.weaponDrops) {
       drop.weaponName = this.getWeaponDisplayName(drop.weaponId);
     }
+    this.refreshUiSnapshot();
   }
 
   private weaponKey(id: WeaponId): TranslationKey {
@@ -99,6 +119,17 @@ export class GameEngine {
     return this.interactables.getOverlappingEntries(this.player.x, this.player.y, this.player.radius);
   }
 
+  subscribeUi(listener: () => void): () => void {
+    this.uiListeners.add(listener);
+    return () => {
+      this.uiListeners.delete(listener);
+    };
+  }
+
+  getUiSnapshot(): EngineUiSnapshot {
+    return this.uiSnapshot;
+  }
+
   getWeaponSlots(): Array<WeaponId | null> {
     return this.weaponSlots.map(w => w ? w.id : null);
   }
@@ -107,6 +138,7 @@ export class GameEngine {
     if (index === this.activeWeaponIndex) return;
     if (!this.weaponSlots[index]) return;
     this.activeWeaponIndex = index;
+    this.refreshUiSnapshot();
   }
 
   pickupWeapon(weaponId: WeaponId, nowMs: number) {
@@ -115,6 +147,7 @@ export class GameEngine {
     const emptyIdx = this.weaponSlots.findIndex(w => !w);
     if (emptyIdx >= 0) {
       this.weaponSlots[emptyIdx] = newWeapon;
+      this.refreshUiSnapshot();
       return;
     }
 
@@ -129,6 +162,7 @@ export class GameEngine {
     }
 
     this.weaponSlots[slotIdx] = newWeapon;
+    this.refreshUiSnapshot();
   }
 
   interactWith(id: string) {
@@ -142,6 +176,7 @@ export class GameEngine {
       this.pickupWeapon(it.weaponId, now);
       this.weaponDrops = this.weaponDrops.filter(w => w.id !== it.id);
       this.interactables.removeById(it.id);
+      this.refreshUiSnapshot();
       return true;
     }
 
@@ -314,6 +349,7 @@ export class GameEngine {
 
     this.waveSystem.reset(now, this.difficulty);
     this.buildWorld(now);
+    this.refreshUiSnapshot();
   }
 
   startGame(difficulty?: Difficulty) {
@@ -323,6 +359,7 @@ export class GameEngine {
     this.gameStarted = true;
     this.resetGame();
     this.onStateChange?.('PLAYING');
+    this.refreshUiSnapshot();
   }
 
   getSkillPos(index: number) {
@@ -442,7 +479,8 @@ export class GameEngine {
   }
 
   loop(time: number) {
-    const dt = (time - this.lastTime) / 1000;
+    const rawDt = (time - this.lastTime) / 1000;
+    const dt = Math.max(0, Math.min(rawDt, 0.05));
     this.lastTime = time;
 
     if (this.gameStarted && !this.gameOver) {
@@ -454,6 +492,8 @@ export class GameEngine {
   }
 
   update(dt: number, time: number) {
+    this.rebuildTileIndexForSubstepCollisions();
+
     if (this.debugFlags.noCooldowns) {
       this.skills.forEach(skill => {
         if (skill) skill.currentCooldown = 0;
@@ -760,23 +800,27 @@ export class GameEngine {
       tile.y = Math.max(tile.height / 2, Math.min(this.world.height - tile.height / 2, tile.y));
     }
 
+    this.rebuildTileIndexForPostTileUpdateCollisions();
+
     for (let i = 0; i < this.tiles.length; i++) {
-      for (let j = i + 1; j < this.tiles.length; j++) {
+      const candidates = this.tileIndex.queryTile(this.tiles[i]);
+      for (const j of candidates) {
+        if (j <= i) continue;
         resolveRectRect(this.tiles[i], this.tiles[j]);
       }
     }
 
-    for (const tile of this.tiles) {
-      resolveCircleRect(this.player, tile);
+    for (const tileIdx of this.tileIndex.queryCircle(this.player)) {
+      resolveCircleRect(this.player, this.tiles[tileIdx]);
     }
 
     for (const enemy of this.enemies) {
-      for (const tile of this.tiles) {
-        resolveCircleRect(enemy, tile);
+      for (const tileIdx of this.tileIndex.queryCircle(enemy)) {
+        resolveCircleRect(enemy, this.tiles[tileIdx]);
       }
     }
 
-    this.bulletManager.collideTiles(this.tiles, this.particles);
+    this.bulletManager.collideTiles(this.tiles, this.particles, (circle) => this.tileIndex.queryCircle(circle));
 
     const combatFinished = this.isCombatRoomFinished();
     if (stage === 'COMBAT' && combatFinished && !this.dungeon.isCombatCleared()) {
@@ -798,6 +842,8 @@ export class GameEngine {
       this.gameOver = true;
       this.onStateChange?.('GAME_OVER');
     }
+
+    this.refreshUiSnapshot();
   }
 
   private buildWorld(nowMs: number) {
@@ -993,8 +1039,8 @@ export class GameEngine {
       const step = Math.min(remaining, 1 / 240);
       this.player.update(step, this.world.width, this.world.height);
       let hitWall = false;
-      for (const tile of this.tiles) {
-        if (resolveCircleRect(this.player, tile)) {
+      for (const tileIdx of this.tileIndex.queryCircle(this.player)) {
+        if (resolveCircleRect(this.player, this.tiles[tileIdx])) {
           hitWall = true;
         }
       }
@@ -1015,8 +1061,8 @@ export class GameEngine {
       this.player.updateKnockback(step, this.world.width, this.world.height);
 
       let hitWall = false;
-      for (const tile of this.tiles) {
-        if (resolveCircleRect(this.player, tile)) {
+      for (const tileIdx of this.tileIndex.queryCircle(this.player)) {
+        if (resolveCircleRect(this.player, this.tiles[tileIdx])) {
           hitWall = true;
         }
       }
@@ -1038,6 +1084,14 @@ export class GameEngine {
     return this.enemies.length === 0;
   }
 
+  private rebuildTileIndexForSubstepCollisions() {
+    this.tileIndex.rebuild(this.tiles);
+  }
+
+  private rebuildTileIndexForPostTileUpdateCollisions() {
+    this.tileIndex.rebuild(this.tiles);
+  }
+
   private updateVisitedRooms(playerX: number, playerY: number) {
     const rooms = this.layout.rooms;
     for (let i = 0; i < rooms.length; i++) {
@@ -1046,5 +1100,26 @@ export class GameEngine {
         this.visitedRoomIndices.add(i);
       }
     }
+  }
+
+  private refreshUiSnapshot() {
+    const weaponSig = `${this.activeWeaponIndex}:${this.weaponSlots.map(w => w ? w.id : '_').join(',')}`;
+    const nearby = this.nearbyInteractables;
+    const interactablesSig = `${this.language}:${nearby.map((e) => `${e.id}:${e.title}`).join('|')}`;
+
+    if (weaponSig === this.uiWeaponSig && interactablesSig === this.uiInteractablesSig) {
+      return;
+    }
+
+    this.uiWeaponSig = weaponSig;
+    this.uiInteractablesSig = interactablesSig;
+
+    this.uiSnapshot = {
+      weaponSlots: this.getWeaponSlots(),
+      activeWeaponIndex: this.activeWeaponIndex,
+      nearbyInteractables: nearby,
+    };
+
+    for (const l of this.uiListeners) l();
   }
 }

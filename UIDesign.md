@@ -166,3 +166,16 @@ If you need a new complex UI element (e.g., a Player Stats Card), compose it usi
   </div>
 </CyberPanel>
 ```
+
+---
+
+## 5. UI ↔ Engine Data Flow (Architecture Rule)
+
+The React layer should **not poll** engine state on an interval.
+
+- Prefer subscribing to the engine’s UI snapshot via React 18 `useSyncExternalStore`.
+- `GameEngine` exposes:
+  - `subscribeUi(listener): () => void`
+  - `getUiSnapshot(): EngineUiSnapshot`
+
+Use this for overlay state that must remain consistent with engine actions (e.g. weapon slots / active weapon / nearby interactables), while keeping the frame-by-frame simulation inside the canvas engine.

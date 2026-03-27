@@ -11,7 +11,9 @@ This file is for autonomous coding agents working in this repository.
 Key paths:
 - `src/components/Game.tsx`: React UI layer (overlays, fullscreen, orientation)
 - `src/game/Engine.ts`: core game loop / input / collisions
+- `src/game/engine/GameEngine.ts`: engine implementation (owns UI snapshot + subscriptions)
 - `src/game/Entities.ts`: entities (Player, enemies, projectiles, particles, etc.)
+- `src/game/physics/TileSpatialIndex.ts`: tile broadphase candidate queries
 - `src/components/ui/*`: Cyber UI component library (see `UIDesign.md`)
 
 ## Build / lint / test
@@ -31,8 +33,7 @@ npm install
 - Copy patterns from `.env.example`.
 - Do **not** commit secrets. `.gitignore` ignores `.env*` and whitelists `.env.example`.
 
-Expected variables (see `.env.example`): `GEMINI_API_KEY`, `APP_URL`.
-Local dev setup (per `README.md`): create `.env.local` containing `GEMINI_API_KEY`.
+Expected variables (see `.env.example`): `APP_URL`.
 
 ### Run (dev)
 
@@ -82,8 +83,6 @@ npm run lint
 - Not applicable until a test runner is added.
 
 ## Local development notes (Vite / AI Studio)
-
-- Vite config defines `process.env.GEMINI_API_KEY` via `loadEnv()` in `vite.config.ts`.
 - HMR can be disabled via `DISABLE_HMR` (`vite.config.ts` comment); avoid changing this behavior unless you understand the AI Studio runtime constraints.
 - Path alias `@` is configured in both `tsconfig.json` and `vite.config.ts`, but current source code primarily uses relative imports.
 
@@ -155,6 +154,14 @@ Composition rules:
 - Use glow sparingly (glow is visually heavy).
 - For overlays: `bg-black/60 backdrop-blur-sm` + centered `CyberPanel` is the default pattern.
 - Data labels should look “terminal-like”: `font-mono uppercase tracking-widest`.
+
+## UI ↔ Engine state (no polling)
+
+- Do **not** add `setInterval`/polling loops to keep overlay state in sync.
+- Use the engine UI external-store API instead:
+  - `engine.subscribeUi(listener): () => void`
+  - `engine.getUiSnapshot(): EngineUiSnapshot`
+- In React, consume it via `useSyncExternalStore`.
 
 ## i18n (EN/中文) technical spec
 

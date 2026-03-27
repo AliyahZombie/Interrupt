@@ -1,17 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Maximize, Minimize, Bug } from 'lucide-react';
-import { GameEngine } from '../game/Engine';
+import { GameEngine, type EngineUiSnapshot } from '../game/Engine';
 import { BoomerElite, MeleeEnemy, RangedEnemy, TankElite } from '../game/Entities';
-import type { NearbyInteractableEntry } from '../game/Entities';
 import type { Difficulty } from '../game/Difficulty';
 import type { WeaponId } from '../game/combat/Weapon';
 import { CyberButton, CyberPanel, CyberText, CyberBadge, CyberInput, CyberProgressBar, CyberGlitchText, CyberModal } from './ui';
 import { useI18n } from '../i18n';
 
+const EMPTY_UI_SNAPSHOT: EngineUiSnapshot = {
+  weaponSlots: [null, null],
+  activeWeaponIndex: 0,
+  nearbyInteractables: [],
+};
+
 export const Game = () => {
   const { t, language, setLanguage } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const [engine, setEngine] = useState<GameEngine | null>(null);
   const [isPortrait, setIsPortrait] = useState(false);
   const [isShortLandscape, setIsShortLandscape] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -23,9 +29,6 @@ export const Game = () => {
   const [showUIPreview, setShowUIPreview] = useState(false);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const [spawnLevelText, setSpawnLevelText] = useState('1');
-  const [weaponSlots, setWeaponSlots] = useState<Array<WeaponId | null>>([null, null]);
-  const [activeWeaponIndex, setActiveWeaponIndex] = useState<0 | 1>(0);
-  const [nearbyDrops, setNearbyDrops] = useState<NearbyInteractableEntry[]>([]);
   const [debugFlags, setDebugFlags] = useState({
     stopSpawning: false,
     godMode: false,
@@ -78,6 +81,7 @@ export const Game = () => {
     if ((isPortrait && !forceStart) || !canvasRef.current) return;
     const engine = new GameEngine(canvasRef.current);
     engineRef.current = engine;
+    setEngine(engine);
 
     engine.setLanguage(language);
 
@@ -104,22 +108,24 @@ export const Game = () => {
     return () => {
       engine.destroy();
       engineRef.current = null;
+      setEngine(null);
     };
   }, [isPortrait, forceStart]);
 
-  
+  const subscribeUi = useCallback((onStoreChange: () => void) => {
+    if (!engine) return () => {};
+    return engine.subscribeUi(onStoreChange);
+  }, [engine]);
 
-  useEffect(() => {
-    if (gameState !== 'PLAYING') return;
-    const id = window.setInterval(() => {
-      const engine = engineRef.current;
-      if (!engine) return;
-      setWeaponSlots(engine.getWeaponSlots());
-      setActiveWeaponIndex(engine.activeWeaponIndex);
-      setNearbyDrops(engine.nearbyInteractables);
-    }, 120);
-    return () => window.clearInterval(id);
-  }, [gameState]);
+  const getUiSnapshot = useCallback((): EngineUiSnapshot => {
+    if (!engine) return EMPTY_UI_SNAPSHOT;
+    return engine.getUiSnapshot();
+  }, [engine]);
+
+  const uiSnapshot = useSyncExternalStore(subscribeUi, getUiSnapshot, () => EMPTY_UI_SNAPSHOT);
+  const weaponSlots = uiSnapshot.weaponSlots;
+  const activeWeaponIndex = uiSnapshot.activeWeaponIndex;
+  const nearbyDrops = uiSnapshot.nearbyInteractables;
 
   const handleStartGame = () => {
     if (engineRef.current) {
@@ -271,12 +277,11 @@ export const Game = () => {
                     key={idx}
                     variant={isActive ? 'primary' : 'ghost'}
                     disabled={isDisabled}
-                    onClick={() => {
-                      const engine = engineRef.current;
-                      if (!engine) return;
-                      engine.switchWeapon(idx as 0 | 1);
-                      setActiveWeaponIndex(idx as 0 | 1);
-                    }}
+                     onClick={() => {
+                       const engine = engineRef.current;
+                       if (!engine) return;
+                       engine.switchWeapon(idx as 0 | 1);
+                     }}
                     className={`w-full !px-3 !py-2 text-left ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <span className="flex items-start gap-2">
@@ -299,14 +304,11 @@ export const Game = () => {
                     <CyberButton
                       key={d.id}
                       variant="ghost"
-                      onClick={() => {
-                        const engine = engineRef.current;
-                        if (!engine) return;
-                        engine.interactWith(d.id);
-                        setNearbyDrops(engine.nearbyInteractables);
-                        setWeaponSlots(engine.getWeaponSlots());
-                        setActiveWeaponIndex(engine.activeWeaponIndex);
-                      }}
+                       onClick={() => {
+                         const engine = engineRef.current;
+                         if (!engine) return;
+                         engine.interactWith(d.id);
+                       }}
                       className="w-full !px-3 !py-2 text-left bg-black/20 hover:bg-black/30 border border-white/10"
                     >
                       <span className="font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight">{d.title}</span>
