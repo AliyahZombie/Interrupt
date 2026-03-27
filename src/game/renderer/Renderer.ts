@@ -37,6 +37,7 @@ export class Renderer {
     }
 
     const t = performance.now() / 1000;
+    const nowMs = t * 1000;
 
     if (engine.navigationPath) {
       if (this.navStartedAtSec === null) {
@@ -63,6 +64,8 @@ export class Renderer {
     engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, t));
     engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
     engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY, engine.language ?? 'en'));
+
+    this.drawSlashArcs(engine, cameraX, cameraY, nowMs);
 
     for (const projectile of engine.projectiles) {
       if (!projectile.isPlayer) {
@@ -143,6 +146,46 @@ export class Renderer {
     }
 
     this.drawUI(engine, t);
+  }
+
+  private drawSlashArcs(engine: GameEngine, cameraX: number, cameraY: number, nowMs: number) {
+    const { ctx } = this;
+    if (!engine.slashArcs || engine.slashArcs.length === 0) return;
+
+    for (const a of engine.slashArcs) {
+      const age = nowMs - a.startedAtMs;
+      if (age < 0 || age > a.durationMs) continue;
+
+      const t = Math.max(0, Math.min(1, age / a.durationMs));
+      const alpha = (1 - t) * (1 - t);
+
+      const x = a.x - cameraX;
+      const y = a.y - cameraY;
+      const start = a.angleRad - a.halfAngleRad;
+      const end = a.angleRad + a.halfAngleRad;
+
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 18 * alpha;
+
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.55 * alpha})`;
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.arc(x, y, a.radius, start, end);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * alpha})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, a.radius, start, end);
+      ctx.stroke();
+
+      ctx.restore();
+    }
   }
 
   private drawBlindOverlay(engine: GameEngine, screenPx: number, screenPy: number, timeSec: number) {
@@ -634,6 +677,38 @@ export class Renderer {
         ctx.textBaseline = 'middle';
         ctx.fillText('+', pos.x, pos.y);
       }
+    }
+
+    const activeWeapon = engine.weaponSlots[engine.activeWeaponIndex];
+    if (engine.rightJoystick.active && activeWeapon?.type === 'charge' && engine.rightChargeStartedAtMs !== null) {
+      const nowMs = performance.now();
+      const chargeMs = Math.max(0, nowMs - engine.rightChargeStartedAtMs);
+      const minMs = activeWeapon.minChargeMs;
+      const maxMs = Math.max(1, activeWeapon.maxChargeMs);
+      const ratio = clamp(chargeMs / maxMs, 0, 1);
+      const ready = chargeMs >= minMs;
+
+      const ox = engine.rightJoystick.originX;
+      const oy = engine.rightJoystick.originY;
+      const r = engine.rightJoystick.radius + 14;
+      const col = ready ? '#22c55e' : '#ef4444';
+
+      ctx.save();
+      ctx.lineWidth = 6;
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.beginPath();
+      ctx.arc(ox, oy, r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = withAlpha(col, 0.92);
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(ox, oy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+      ctx.stroke();
+
+      ctx.restore();
     }
 
     const drawJoystick = (joy: JoystickData, color: string) => {

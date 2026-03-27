@@ -29,6 +29,7 @@ export const Game = () => {
   const [showUIPreview, setShowUIPreview] = useState(false);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const [spawnLevelText, setSpawnLevelText] = useState('1');
+  const [spawnWeaponId, setSpawnWeaponId] = useState<WeaponId>('default');
   const [debugFlags, setDebugFlags] = useState({
     stopSpawning: false,
     godMode: false,
@@ -36,10 +37,19 @@ export const Game = () => {
     showWaveDebug: false,
   });
 
+  const debugWeaponOptions: Array<{ id: WeaponId; label: string }> = [
+    { id: 'default', label: 'DEFAULT GUN' },
+    { id: 'knife', label: 'KNIFE' },
+    { id: 'bow', label: 'BOW' },
+    { id: 'bounce_gun', label: 'BOUNCE GUN' },
+  ];
+
   const weaponKeyById = {
     default: 'weapon.default',
     bounce_gun: 'weapon.bounce_gun',
-  } satisfies Record<WeaponId, 'weapon.default' | 'weapon.bounce_gun'>;
+    knife: 'weapon.knife',
+    bow: 'weapon.bow',
+  } satisfies Record<WeaponId, 'weapon.default' | 'weapon.bounce_gun' | 'weapon.knife' | 'weapon.bow'>;
 
   const debugFlagsRef = useRef(debugFlags);
   useEffect(() => {
@@ -173,6 +183,28 @@ export const Game = () => {
                   onChange={(e) => setSpawnLevelText(e.target.value)}
                   placeholder="1"
                 />
+
+                <div className="flex flex-col gap-2">
+                  <CyberText variant="label" color="cyan">SPAWN WEAPON DROP</CyberText>
+                  <select
+                    value={spawnWeaponId}
+                    onChange={(e) => {
+                      const next = debugWeaponOptions.find(opt => opt.id === e.target.value);
+                      if (next) {
+                        setSpawnWeaponId(next.id);
+                      }
+                    }}
+                    className="w-full bg-black/40 border border-cyan-500/30 text-cyan-200 font-mono uppercase tracking-widest text-xs px-3 py-2 clip-chamfer-sm focus:outline-none focus:border-cyan-400/60"
+                  >
+                    {debugWeaponOptions.map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <CyberButton variant="primary" onClick={() => {
+                    engineRef.current?.debugSpawnWeaponDrop(spawnWeaponId);
+                  }}>SPAWN WEAPON</CyberButton>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                 <CyberButton variant="danger" onClick={() => {
                   if (engineRef.current) engineRef.current.enemies = [];

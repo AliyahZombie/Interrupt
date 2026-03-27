@@ -28,6 +28,8 @@ export const en = {
   'weapon.empty': 'EMPTY',
   'weapon.default': 'DEFAULT',
   'weapon.bounce_gun': 'BOUNCE GUN',
+  'weapon.knife': 'KNIFE',
+  'weapon.bow': 'BOW',
 
   'hud.score': 'SCORE',
   'hud.credits': 'CREDITS',
@@ -96,6 +98,8 @@ export const zh: Record<TranslationKey, string> = {
   'weapon.empty': '空',
   'weapon.default': '基础武器',
   'weapon.bounce_gun': '弹力枪',
+  'weapon.knife': '匕首',
+  'weapon.bow': '弓',
 
   'hud.score': '分数',
   'hud.credits': '信用点',

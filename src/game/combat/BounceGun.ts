@@ -1,8 +1,9 @@
-import { Bullet, type Player } from '../Entities';
-import type { Weapon, WeaponFireContext } from './Weapon';
+import { Bullet } from '../Entities';
+import type { ProjectileWeapon, WeaponFireContext } from './Weapon';
 
-export class BounceGun implements Weapon {
-  id: Weapon['id'] = 'bounce_gun';
+export class BounceGun implements ProjectileWeapon {
+  id: ProjectileWeapon['id'] = 'bounce_gun';
+  type: ProjectileWeapon['type'] = 'projectile';
   name = 'BOUNCE GUN';
 
   damage = 25;

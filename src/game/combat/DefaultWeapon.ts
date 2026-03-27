@@ -1,8 +1,9 @@
-import { Bullet, type Player } from '../Entities';
-import type { Weapon, WeaponFireContext } from './Weapon';
+import { Bullet } from '../Entities';
+import type { ProjectileWeapon, WeaponFireContext } from './Weapon';
 
-export class DefaultWeapon implements Weapon {
-  id: Weapon['id'] = 'default';
+export class DefaultWeapon implements ProjectileWeapon {
+  id: ProjectileWeapon['id'] = 'default';
+  type: ProjectileWeapon['type'] = 'projectile';
   name = 'DEFAULT';
 
   damage = 50;

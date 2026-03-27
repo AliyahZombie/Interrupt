@@ -25,7 +25,6 @@ import type { Difficulty, DifficultyRules } from '../Difficulty';
 import { resolveCircleRect, resolveRectRect } from '../physics/Collisions';
 import { TileSpatialIndex } from '../physics/TileSpatialIndex';
 import { BulletManager } from '../combat/BulletManager';
-import { DefaultWeapon } from '../combat/DefaultWeapon';
 import type { Weapon, WeaponId } from '../combat/Weapon';
 import { createWeaponById } from '../combat/weapons';
 import type { Language, TranslationKey } from '../../i18n/translations';
@@ -53,6 +52,16 @@ export interface EngineUiSnapshot {
   activeWeaponIndex: 0 | 1;
   nearbyInteractables: NearbyInteractableEntry[];
 }
+
+type SlashArcFx = {
+  x: number;
+  y: number;
+  radius: number;
+  angleRad: number;
+  halfAngleRad: number;
+  startedAtMs: number;
+  durationMs: number;
+};
 
 export class GameEngine {
   canvas: HTMLCanvasElement;
@@ -87,8 +96,12 @@ export class GameEngine {
   activeSkillIndex: number | null = null;
 
   private bulletManager = new BulletManager();
-  weaponSlots: Array<Weapon | null> = [new DefaultWeapon(), null];
+  weaponSlots: Array<Weapon | null> = [createWeaponById('default'), createWeaponById('knife')];
   activeWeaponIndex: 0 | 1 = 0;
+
+  rightChargeStartedAtMs: number | null = null;
+  private rightChargeWeaponId: WeaponId | null = null;
+  private rightChargeWeaponIndex: 0 | 1 | null = null;
 
   language: Language = 'en';
 
@@ -103,6 +116,8 @@ export class GameEngine {
   private weaponKey(id: WeaponId): TranslationKey {
     if (id === 'default') return 'weapon.default';
     if (id === 'bounce_gun') return 'weapon.bounce_gun';
+    if (id === 'knife') return 'weapon.knife';
+    if (id === 'bow') return 'weapon.bow';
     const _exhaustive: never = id;
     return _exhaustive;
   }
@@ -165,6 +180,15 @@ export class GameEngine {
     this.refreshUiSnapshot();
   }
 
+  debugSpawnWeaponDrop(weaponId: WeaponId, nowMs: number = performance.now()) {
+    const ox = this.player.x + (Math.random() - 0.5) * 40;
+    const oy = this.player.y + (Math.random() - 0.5) * 40;
+    const drop = new WeaponDrop(ox, oy, nowMs, weaponId, this.getWeaponDisplayName(weaponId));
+    this.weaponDrops.push(drop);
+    this.interactables.add(drop);
+    this.refreshUiSnapshot();
+  }
+
   interactWith(id: string) {
     const it = this.interactables.findById(id);
     if (!it) return false;
@@ -203,6 +227,7 @@ export class GameEngine {
 
   enemies: BaseEnemy[] = [];
   particles: Particle[] = [];
+  slashArcs: SlashArcFx[] = [];
   credits: Credit[] = [];
   tiles: Tile[] = [];
 
@@ -324,6 +349,7 @@ export class GameEngine {
     this.enemies = [];
     this.bulletManager.reset();
     this.particles = [];
+    this.slashArcs = [];
     this.credits = [];
     this.tiles = [];
     this.healthPickups = [];
@@ -342,6 +368,18 @@ export class GameEngine {
     this.collectedCredits = 0;
     this.gameOver = false;
     this.lastTime = now;
+
+    this.weaponSlots = [createWeaponById('default'), createWeaponById('knife')];
+    this.activeWeaponIndex = 0;
+    this.rightChargeStartedAtMs = null;
+    this.rightChargeWeaponId = null;
+    this.rightChargeWeaponIndex = null;
+    this.leftJoystick.active = false;
+    this.leftJoystick.touchId = null;
+    this.rightJoystick.active = false;
+    this.rightJoystick.touchId = null;
+    this.skillJoystick.active = false;
+    this.skillJoystick.touchId = null;
     this.skills.forEach(s => {
       if (s) s.currentCooldown = 0;
     });
@@ -350,6 +388,41 @@ export class GameEngine {
     this.waveSystem.reset(now, this.difficulty);
     this.buildWorld(now);
     this.refreshUiSnapshot();
+  }
+
+  private applyDamageToEnemy(enemy: BaseEnemy, damage: number, timeMs: number) {
+    if (damage <= 0) return;
+    if (enemy.hp <= 0) return;
+
+    if (!this.enemies.includes(enemy)) return;
+    enemy.hp -= damage;
+    if (enemy.hp > 0) return;
+
+    const idx = this.enemies.indexOf(enemy);
+    if (idx < 0) return;
+    this.enemies.splice(idx, 1);
+    this.handleEnemyKilled(enemy, timeMs);
+  }
+
+  private tryMeleeAttack(timeMs: number) {
+    const weapon = this.weaponSlots[this.activeWeaponIndex];
+    if (!weapon || weapon.type !== 'melee') return;
+
+    const enemiesSnapshot = [...this.enemies];
+
+    weapon.tryAttack({
+      timeMs,
+      owner: this.player,
+      enemies: enemiesSnapshot,
+      applyDamageToEnemy: (enemy, damage, atMs) => this.applyDamageToEnemy(enemy, damage, atMs),
+      spawnSlashArc: (arc) => {
+        this.slashArcs.push({
+          ...arc,
+          startedAtMs: timeMs,
+          durationMs: 140,
+        });
+      },
+    });
   }
 
   startGame(difficulty?: Difficulty) {
@@ -407,12 +480,29 @@ export class GameEngine {
       this.leftJoystick.y = e.clientY;
       this.leftJoystick.touchId = e.pointerId;
     } else if (e.clientX >= window.innerWidth / 2 && !this.rightJoystick.active) {
+      const weapon = this.weaponSlots[this.activeWeaponIndex];
+
       this.rightJoystick.active = true;
       this.rightJoystick.originX = e.clientX;
       this.rightJoystick.originY = e.clientY;
       this.rightJoystick.x = e.clientX;
       this.rightJoystick.y = e.clientY;
       this.rightJoystick.touchId = e.pointerId;
+
+      if (weapon?.type === 'charge') {
+        const now = performance.now();
+        this.rightChargeStartedAtMs = now;
+        this.rightChargeWeaponId = weapon.id;
+        this.rightChargeWeaponIndex = this.activeWeaponIndex;
+      } else {
+        this.rightChargeStartedAtMs = null;
+        this.rightChargeWeaponId = null;
+        this.rightChargeWeaponIndex = null;
+      }
+
+      if (weapon?.type === 'melee') {
+        this.tryMeleeAttack(performance.now());
+      }
     }
   }
 
@@ -444,6 +534,10 @@ export class GameEngine {
         this.leftJoystick.y = e.clientY;
       }
     } else if (this.rightJoystick.active && this.rightJoystick.touchId === e.pointerId) {
+      const weapon = this.weaponSlots[this.activeWeaponIndex];
+      if (weapon?.type === 'melee') {
+        return;
+      }
       const dx = e.clientX - this.rightJoystick.originX;
       const dy = e.clientY - this.rightJoystick.originY;
       const distance = Math.hypot(dx, dy);
@@ -473,8 +567,30 @@ export class GameEngine {
       this.leftJoystick.touchId = null;
     }
     if (this.rightJoystick.touchId === e.pointerId) {
+      const weapon = this.weaponSlots[this.activeWeaponIndex];
+      if (weapon?.type === 'charge' && this.rightChargeStartedAtMs !== null) {
+        const now = performance.now();
+        const dx = this.rightJoystick.x - this.rightJoystick.originX;
+        const dy = this.rightJoystick.y - this.rightJoystick.originY;
+
+        const sameWeapon = this.rightChargeWeaponId === weapon.id && this.rightChargeWeaponIndex === this.activeWeaponIndex;
+        if (sameWeapon) {
+          weapon.tryRelease({
+            timeMs: now,
+            owner: this.player,
+            aimDx: dx,
+            aimDy: dy,
+            chargeMs: Math.max(0, now - this.rightChargeStartedAtMs),
+            spawnBullet: (bullet) => this.spawnBullet(bullet),
+          });
+        }
+      }
+
       this.rightJoystick.active = false;
       this.rightJoystick.touchId = null;
+      this.rightChargeStartedAtMs = null;
+      this.rightChargeWeaponId = null;
+      this.rightChargeWeaponIndex = null;
     }
   }
 
@@ -548,7 +664,7 @@ export class GameEngine {
       const dy = this.rightJoystick.y - this.rightJoystick.originY;
 
       const weapon = this.weaponSlots[this.activeWeaponIndex];
-      if (weapon) {
+      if (weapon && weapon.type === 'projectile') {
         weapon.tryFire({
           timeMs: time,
           owner: this.player,
@@ -794,6 +910,13 @@ export class GameEngine {
       }
     }
 
+    for (let i = this.slashArcs.length - 1; i >= 0; i--) {
+      const a = this.slashArcs[i];
+      if (time - a.startedAtMs >= a.durationMs) {
+        this.slashArcs.splice(i, 1);
+      }
+    }
+
     for (const tile of this.tiles) {
       tile.update(dt);
       tile.x = Math.max(tile.width / 2, Math.min(this.world.width - tile.width / 2, tile.x));
@@ -888,6 +1011,17 @@ export class GameEngine {
     );
     this.weaponDrops.push(weaponDrop);
     this.interactables.add(weaponDrop);
+
+    const bow = createWeaponById('bow');
+    const bowDrop = new WeaponDrop(
+      rewardCenterX - 120,
+      rewardCenterY,
+      nowMs,
+      bow.id,
+      this.getWeaponDisplayName(bow.id),
+    );
+    this.weaponDrops.push(bowDrop);
+    this.interactables.add(bowDrop);
 
     const portalCenterX = portal.x + portal.width / 2;
     const portalCenterY = portal.y + portal.height / 2;
