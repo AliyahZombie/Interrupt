@@ -13,6 +13,38 @@ const EMPTY_UI_SNAPSHOT: EngineUiSnapshot = {
   nearbyInteractables: [],
 };
 
+const usePresence = (isOpen: boolean, durationMs: number) => {
+  const [isMounted, setIsMounted] = useState(isOpen);
+  const [state, setState] = useState<'enter' | 'exit'>(isOpen ? 'enter' : 'exit');
+  const timeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      setIsMounted(true);
+      window.requestAnimationFrame(() => setState('enter'));
+      return;
+    }
+
+    setState('exit');
+    timeoutRef.current = window.setTimeout(() => {
+      setIsMounted(false);
+    }, durationMs);
+
+    return () => {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [isOpen, durationMs]);
+
+  return { isMounted, state };
+};
+
 export const Game = () => {
   const { t, language, setLanguage } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -72,7 +104,7 @@ export const Game = () => {
         await document.exitFullscreen();
       }
     } catch (err) {
-      console.error("Error toggling fullscreen:", err);
+      console.error('Error toggling fullscreen:', err);
     }
   };
 
@@ -114,7 +146,7 @@ export const Game = () => {
       setScore(newScore);
       setCredits(newCredits);
     };
-    
+
     return () => {
       engine.destroy();
       engineRef.current = null;
@@ -137,6 +169,10 @@ export const Game = () => {
   const activeWeaponIndex = uiSnapshot.activeWeaponIndex;
   const nearbyDrops = uiSnapshot.nearbyInteractables;
 
+  const startOverlay = usePresence(gameState === 'START', 200);
+  const gameOverOverlay = usePresence(gameState === 'GAME_OVER', 200);
+  const rotateOverlay = usePresence(isPortrait && !forceStart, 200);
+
   const handleStartGame = () => {
     if (engineRef.current) {
       engineRef.current.startGame(difficulty);
@@ -154,12 +190,12 @@ export const Game = () => {
         className="block w-full h-full touch-none"
         style={{ touchAction: 'none' }}
       />
-      
+       
       {/* Debug Button */}
       <div className="absolute top-4 left-4 z-30">
         <button 
           onClick={() => setIsDebugPanelOpen(true)}
-          className="p-2 bg-black/50 border border-cyan-500/30 text-cyan-500 clip-chamfer-sm hover:bg-cyan-900/50 transition-colors"
+          className="p-2 bg-black/50 border border-cyan-500/30 text-cyan-500 clip-chamfer-sm hover:bg-cyan-900/50 transition-[background-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none motion-reduce:transform-none focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(6,182,212,0.35),0_0_12px_rgba(6,182,212,0.25)] active:translate-y-px"
           aria-label="Open Debug Panel"
         >
           <Bug size={24} />
@@ -331,7 +367,7 @@ export const Game = () => {
           {nearbyDrops.length > 0 && (
             <div className="absolute right-4 top-1/2 -translate-y-1/2 w-72 pointer-events-auto z-40">
               <div className="bg-black/40 backdrop-blur-sm border border-white/10 clip-chamfer-sm p-2">
-                <div className="flex flex-col gap-2 max-h-72 overflow-y-auto">
+                <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-2 custom-scrollbar">
                   {nearbyDrops.map((d) => (
                     <CyberButton
                       key={d.id}
@@ -354,10 +390,18 @@ export const Game = () => {
       )}
 
       {/* UI Overlays */}
-      {gameState === 'START' && (
-        <div className="absolute inset-0 z-20 overflow-hidden bg-black/60 backdrop-blur-sm">
+      {startOverlay.isMounted && (
+        <div
+          className={`absolute inset-0 z-20 overflow-hidden bg-black/60 backdrop-blur-sm transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+            gameState === 'START' ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
           <div className="absolute inset-0 p-4 flex items-center justify-center">
-            <div className="w-full max-w-lg max-h-[calc(100svh-2rem)]">
+            <div
+              className={`w-full max-w-lg max-h-[calc(100svh-2rem)] transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none ${
+                startOverlay.state === 'enter' ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-95'
+              }`}
+            >
               <CyberPanel
                 variant="cyan"
                 className="w-full max-h-[calc(100svh-2rem)]"
@@ -489,10 +533,18 @@ export const Game = () => {
         </div>
       </CyberModal>
 
-      {gameState === 'GAME_OVER' && (
-        <div className="absolute inset-0 z-20 overflow-hidden bg-black/80 backdrop-blur-md">
+      {gameOverOverlay.isMounted && (
+        <div
+          className={`absolute inset-0 z-20 overflow-hidden bg-black/80 backdrop-blur-md transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+            gameState === 'GAME_OVER' ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
           <div className="absolute inset-0 p-4 flex items-center justify-center">
-            <div className="w-full max-w-md max-h-[calc(100svh-2rem)]">
+            <div
+              className={`w-full max-w-md max-h-[calc(100svh-2rem)] transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none ${
+                gameOverOverlay.state === 'enter' ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-95'
+              }`}
+            >
               <CyberPanel
                 variant="red"
                 className="w-full max-h-[calc(100svh-2rem)]"
@@ -523,14 +575,23 @@ export const Game = () => {
 
       <button
         onClick={toggleFullscreen}
-        className="absolute top-4 right-4 z-30 p-2 bg-black/50 clip-chamfer-sm text-white hover:bg-black/70 transition-colors border border-white/10"
+        className="absolute top-4 right-4 z-30 p-2 bg-black/50 clip-chamfer-sm text-white hover:bg-black/70 transition-[background-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none motion-reduce:transform-none border border-white/10 focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(255,255,255,0.18),0_0_12px_rgba(255,255,255,0.12)] active:translate-y-px"
         aria-label={t('aria.toggleFullscreen')}
       >
         {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
       </button>
 
-      {isPortrait && !forceStart && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-cyber-bg text-white p-8 text-center bg-scanlines">
+      {rotateOverlay.isMounted && (
+        <div
+          className={`absolute inset-0 z-50 flex items-center justify-center bg-cyber-bg text-white p-8 text-center bg-scanlines transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+            isPortrait && !forceStart ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <div
+            className={`w-full max-w-md transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none ${
+              rotateOverlay.state === 'enter' ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-95'
+            }`}
+          >
             <CyberPanel variant="cyan" className="w-full max-w-md" contentClassName="text-center">
             <CyberText variant="h2" color="cyan" glow className="mb-4">{t('rotate.title')}</CyberText>
             <CyberText variant="body" color="neutral" className="mb-8">
@@ -540,6 +601,7 @@ export const Game = () => {
               {t('rotate.playAnyway')}
             </CyberButton>
           </CyberPanel>
+          </div>
         </div>
       )}
     </div>
