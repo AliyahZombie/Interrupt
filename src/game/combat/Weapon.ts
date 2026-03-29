@@ -1,6 +1,16 @@
 import type { BaseEnemy, Bullet, Player } from '../Entities';
 
-export type WeaponId = 'default' | 'bounce_gun' | 'knife' | 'bow';
+export type WeaponId =
+  | 'default'
+  | 'bounce_gun'
+  | 'knife'
+  | 'bow'
+  | 'pierce_gun'
+  | 'omni'
+  | 'em_generator'
+  | 'scatter_railgun';
+
+export type WeaponQuality = 'white' | 'green' | 'blue' | 'red';
 
 export type WeaponType = 'projectile' | 'melee' | 'charge';
 
@@ -24,6 +34,17 @@ export interface MeleeAttackContext {
     angleRad: number;
     halfAngleRad: number;
   }) => void;
+  spawnExpandingRing: (params: {
+    x: number;
+    y: number;
+    maxRadius: number;
+    durationMs: number;
+    color: string;
+    thicknessPx: number;
+    damage: number;
+    stunMinMs: number;
+    stunMaxMs: number;
+  }) => void;
 }
 
 export interface ChargeReleaseContext {
@@ -39,6 +60,7 @@ export interface WeaponBase {
   id: WeaponId;
   type: WeaponType;
   name: string;
+  quality: WeaponQuality;
 }
 
 export interface ProjectileWeapon extends WeaponBase {
@@ -68,3 +90,14 @@ export interface ChargeWeapon extends WeaponBase {
 }
 
 export type Weapon = ProjectileWeapon | MeleeWeapon | ChargeWeapon;
+
+export const weaponMpCostById: Record<WeaponId, number> = {
+  default: 0,
+  knife: 0,
+  bow: 10,
+  bounce_gun: 0.1,
+  pierce_gun: 0.5,
+  omni: 5,
+  em_generator: 5,
+  scatter_railgun: 15,
+};

@@ -5,6 +5,9 @@ export interface BulletOptions {
   effectKind?: EffectKind;
   effectDurationMs?: number;
   bouncesRemaining?: number;
+  piercesRemaining?: number;
+  strokeColor?: string;
+  strokeWidthPx?: number;
 }
 
 export class Bullet {
@@ -12,6 +15,10 @@ export class Bullet {
   public effectKind?: EffectKind;
   public effectDurationMs?: number;
   public bouncesRemaining: number;
+  public piercesRemaining: number;
+  public hitTargets: WeakSet<object>;
+  public strokeColor?: string;
+  public strokeWidthPx: number;
   constructor(
     public x: number,
     public y: number,
@@ -28,6 +35,10 @@ export class Bullet {
     this.effectKind = options?.effectKind;
     this.effectDurationMs = options?.effectDurationMs;
     this.bouncesRemaining = options?.bouncesRemaining ?? 0;
+    this.piercesRemaining = options?.piercesRemaining ?? 0;
+    this.hitTargets = new WeakSet();
+    this.strokeColor = options?.strokeColor;
+    this.strokeWidthPx = options?.strokeWidthPx ?? 2;
   }
 
   update(dt: number) {
@@ -36,13 +47,25 @@ export class Bullet {
   }
 
   draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
+    const x = this.x - cameraX;
+    const y = this.y - cameraY;
+
     ctx.shadowColor = this.color;
     ctx.shadowBlur = 10;
     ctx.fillStyle = this.color;
     ctx.beginPath();
-    ctx.arc(this.x - cameraX, this.y - cameraY, this.radius, 0, Math.PI * 2);
+    ctx.arc(x, y, this.radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.closePath();
     ctx.shadowBlur = 0;
+
+    if (this.strokeColor) {
+      ctx.strokeStyle = this.strokeColor;
+      ctx.lineWidth = this.strokeWidthPx;
+      ctx.beginPath();
+      ctx.arc(x, y, this.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.closePath();
+    }
   }
 }

@@ -30,11 +30,16 @@ export const en = {
   'weapon.bounce_gun': 'BOUNCE GUN',
   'weapon.knife': 'KNIFE',
   'weapon.bow': 'BOW',
+  'weapon.pierce_gun': 'PIERCE GUN',
+  'weapon.omni': 'OMNI',
+  'weapon.em_generator': 'ELECTROMAGNETIC GEN',
+  'weapon.scatter_railgun': 'SCATTER RAILGUN',
 
   'hud.score': 'SCORE',
   'hud.credits': 'CREDITS',
   'hud.auxShield': 'AUX.SHIELD',
   'hud.sysIntegrity': 'SYS.INTEGRITY',
+  'hud.mp': 'MP',
   'hud.sysMap': 'SYS.MAP',
   'hud.worldIndex': 'WORLD {index}',
 
@@ -101,11 +106,16 @@ export const zh: Record<TranslationKey, string> = {
   'weapon.bounce_gun': '弹力枪',
   'weapon.knife': '匕首',
   'weapon.bow': '弓',
+  'weapon.pierce_gun': '穿透枪',
+  'weapon.omni': '万象',
+  'weapon.em_generator': '电磁发生器',
+  'weapon.scatter_railgun': '散射轨道炮',
 
   'hud.score': '分数',
   'hud.credits': '信用点',
   'hud.auxShield': '辅助护盾',
   'hud.sysIntegrity': '系统完整性',
+  'hud.mp': '蓝量',
   'hud.sysMap': '系统地图',
   'hud.worldIndex': '世界 {index}',
 

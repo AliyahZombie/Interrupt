@@ -1,23 +1,23 @@
 import { Bullet } from '../Entities';
 import type { ProjectileWeapon, WeaponFireContext } from './Weapon';
 
-export class DefaultWeapon implements ProjectileWeapon {
-  id: ProjectileWeapon['id'] = 'default';
+export class PierceGun implements ProjectileWeapon {
+  id: ProjectileWeapon['id'] = 'pierce_gun';
   type: ProjectileWeapon['type'] = 'projectile';
-  name = 'DEFAULT';
-  quality: ProjectileWeapon['quality'] = 'white';
+  name = 'PIERCE GUN';
+  quality: ProjectileWeapon['quality'] = 'green';
 
   damage = 50;
   fireIntervalMs = 150;
 
   private minAimDistance = 10;
   private bulletSpeed = 1000;
-  private bulletLifeMs = 1500;
-  private bulletColor = '#eab308';
+  private bulletLifeMs = 1600;
+  private bulletColor = '#22c55e';
 
   private lastShotAtMs = 0;
 
-  tryFire(ctx: WeaponFireContext) {
+  tryFire(ctx: WeaponFireContext): boolean {
     const { timeMs, owner, aimDx, aimDy, spawnBullet } = ctx;
 
     if (timeMs - this.lastShotAtMs <= this.fireIntervalMs) {
@@ -40,6 +40,7 @@ export class DefaultWeapon implements ProjectileWeapon {
       this.damage,
       true,
       this.bulletColor,
+      { radius: 4, piercesRemaining: -1 },
     ));
 
     this.lastShotAtMs = timeMs;

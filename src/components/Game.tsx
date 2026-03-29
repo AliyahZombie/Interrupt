@@ -3,14 +3,23 @@ import { Maximize, Minimize, Bug } from 'lucide-react';
 import { GameEngine, type EngineUiSnapshot } from '../game/Engine';
 import { BoomerElite, MeleeEnemy, RangedEnemy, TankElite } from '../game/Entities';
 import type { Difficulty } from '../game/Difficulty';
-import type { WeaponId } from '../game/combat/Weapon';
+import type { WeaponId, WeaponQuality } from '../game/combat/Weapon';
 import { CyberButton, CyberPanel, CyberText, CyberBadge, CyberInput, CyberProgressBar, CyberGlitchText, CyberModal } from './ui';
 import { useI18n } from '../i18n';
+import type { TranslationKey } from '../i18n/translations';
 
 const EMPTY_UI_SNAPSHOT: EngineUiSnapshot = {
   weaponSlots: [null, null],
+  weaponQualities: [null, null],
   activeWeaponIndex: 0,
   nearbyInteractables: [],
+};
+
+const qualityTextClass: Record<WeaponQuality, string> = {
+  white: 'text-white/90',
+  green: 'text-green-300',
+  blue: 'text-blue-300',
+  red: 'text-red-300',
 };
 
 const usePresence = (isOpen: boolean, durationMs: number) => {
@@ -74,6 +83,10 @@ export const Game = () => {
     { id: 'knife', label: 'KNIFE' },
     { id: 'bow', label: 'BOW' },
     { id: 'bounce_gun', label: 'BOUNCE GUN' },
+    { id: 'pierce_gun', label: 'PIERCE GUN (GREEN)' },
+    { id: 'omni', label: '万象 (GREEN)' },
+    { id: 'em_generator', label: 'ELECTROMAGNETIC GEN (BLUE)' },
+    { id: 'scatter_railgun', label: 'SCATTER RAILGUN (BLUE)' },
   ];
 
   const weaponKeyById = {
@@ -81,7 +94,11 @@ export const Game = () => {
     bounce_gun: 'weapon.bounce_gun',
     knife: 'weapon.knife',
     bow: 'weapon.bow',
-  } satisfies Record<WeaponId, 'weapon.default' | 'weapon.bounce_gun' | 'weapon.knife' | 'weapon.bow'>;
+    pierce_gun: 'weapon.pierce_gun',
+    omni: 'weapon.omni',
+    em_generator: 'weapon.em_generator',
+    scatter_railgun: 'weapon.scatter_railgun',
+  } satisfies Record<WeaponId, TranslationKey>;
 
   const debugFlagsRef = useRef(debugFlags);
   useEffect(() => {
@@ -166,6 +183,7 @@ export const Game = () => {
 
   const uiSnapshot = useSyncExternalStore(subscribeUi, getUiSnapshot, () => EMPTY_UI_SNAPSHOT);
   const weaponSlots = uiSnapshot.weaponSlots;
+  const weaponQualities = uiSnapshot.weaponQualities;
   const activeWeaponIndex = uiSnapshot.activeWeaponIndex;
   const nearbyDrops = uiSnapshot.nearbyInteractables;
 
@@ -239,6 +257,14 @@ export const Game = () => {
                   <CyberButton variant="primary" onClick={() => {
                     engineRef.current?.debugSpawnWeaponDrop(spawnWeaponId);
                   }}>SPAWN WEAPON</CyberButton>
+
+                  <CyberButton variant="ghost" onClick={() => {
+                    const engine = engineRef.current;
+                    if (!engine) return;
+                    for (const opt of debugWeaponOptions) {
+                      engine.debugSpawnWeaponDrop(opt.id);
+                    }
+                  }}>SPAWN ALL WEAPONS</CyberButton>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -338,8 +364,10 @@ export const Game = () => {
             <div className="flex flex-col gap-2">
               {[0, 1].map((idx) => {
                 const slot = weaponSlots[idx];
+                const slotQuality = slot ? weaponQualities[idx] : null;
                 const isActive = activeWeaponIndex === idx;
                 const isDisabled = !slot;
+                const slotTextClass = slot && slotQuality ? qualityTextClass[slotQuality] : 'text-neutral-400';
                 return (
                   <CyberButton
                     key={idx}
@@ -354,7 +382,7 @@ export const Game = () => {
                   >
                     <span className="flex items-start gap-2">
                       <CyberBadge variant={isActive ? 'cyan' : 'neutral'}>{idx + 1}</CyberBadge>
-                      <span className="font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight">
+                      <span className={`font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight ${slotTextClass}`}>
                         {slot ? t(weaponKeyById[slot]) : t('weapon.empty')}
                       </span>
                     </span>
@@ -379,7 +407,7 @@ export const Game = () => {
                        }}
                       className="w-full !px-3 !py-2 text-left bg-black/20 hover:bg-black/30 border border-white/10"
                     >
-                      <span className="font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight">{d.title}</span>
+                      <span className={`font-mono uppercase text-[11px] tracking-widest whitespace-normal break-words leading-tight ${d.quality ? qualityTextClass[d.quality] : 'text-neutral-300'}`}>{d.title}</span>
                     </CyberButton>
                   ))}
                 </div>

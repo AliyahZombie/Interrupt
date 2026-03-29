@@ -5,6 +5,7 @@ export class BounceGun implements ProjectileWeapon {
   id: ProjectileWeapon['id'] = 'bounce_gun';
   type: ProjectileWeapon['type'] = 'projectile';
   name = 'BOUNCE GUN';
+  quality: ProjectileWeapon['quality'] = 'white';
 
   damage = 25;
   fireIntervalMs = 100;

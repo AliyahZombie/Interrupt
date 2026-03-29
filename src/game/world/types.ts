@@ -1,6 +1,6 @@
 export type RoomKind = 'HUB' | 'COMBAT' | 'REWARD' | 'PORTAL';
 
-export type RewardContent = 'CREDIT' | 'HEAL' | 'WEAPON';
+export type RewardContent = 'CREDIT' | 'HEAL' | 'MP' | 'WEAPON';
 
 export interface Rect {
   x: number;

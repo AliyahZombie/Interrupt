@@ -29,6 +29,9 @@ export class Player {
   shieldRegenPerSecond: number = 60;
   lastDamagedAtMs: number = -Infinity;
 
+  mp: number = 300;
+  maxMp: number = 300;
+
   constructor(
     public x: number,
     public y: number,
@@ -48,6 +51,7 @@ export class Player {
   resetVitals(timeMs: number) {
     this.hp = this.maxHp;
     this.shield = this.maxShield;
+    this.mp = this.maxMp;
     this.lastDamagedAtMs = timeMs;
     this.effectManager.clear();
   }

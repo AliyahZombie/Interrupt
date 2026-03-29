@@ -9,9 +9,10 @@ export class KnifeWeapon implements MeleeWeapon {
   id: MeleeWeapon['id'] = 'knife';
   type: MeleeWeapon['type'] = 'melee';
   name = 'KNIFE';
+  quality: MeleeWeapon['quality'] = 'white';
 
   damage = 100;
-  attackIntervalMs = 500;
+  attackIntervalMs = 150;
   rangePx = 100;
   arcRadiusPx = 100;
   arcHalfAngleRad = Math.PI / 4;

@@ -3,6 +3,7 @@ import {
   BoomerElite,
   Bullet,
   Credit,
+  MpDrop,
   FlameShooterEnemy,
   HealthPickup,
   InteractableManager,
@@ -25,7 +26,7 @@ import type { Difficulty, DifficultyRules } from '../Difficulty';
 import { resolveCircleRect, resolveRectRect } from '../physics/Collisions';
 import { TileSpatialIndex } from '../physics/TileSpatialIndex';
 import { BulletManager } from '../combat/BulletManager';
-import type { Weapon, WeaponId } from '../combat/Weapon';
+import { weaponMpCostById, type Weapon, type WeaponId, type WeaponQuality } from '../combat/Weapon';
 import { createWeaponById } from '../combat/weapons';
 import type { Language, TranslationKey } from '../../i18n/translations';
 import { translate } from '../../i18n/translate';
@@ -49,6 +50,7 @@ import { computeSpawnEnemyLevel } from './spawnLevels';
 
 export interface EngineUiSnapshot {
   weaponSlots: Array<WeaponId | null>;
+  weaponQualities: Array<WeaponQuality | null>;
   activeWeaponIndex: 0 | 1;
   nearbyInteractables: NearbyInteractableEntry[];
 }
@@ -61,6 +63,20 @@ type SlashArcFx = {
   halfAngleRad: number;
   startedAtMs: number;
   durationMs: number;
+};
+
+type ExpandingRingFx = {
+  x: number;
+  y: number;
+  maxRadius: number;
+  startedAtMs: number;
+  durationMs: number;
+  color: string;
+  thicknessPx: number;
+  damage: number;
+  stunMinMs: number;
+  stunMaxMs: number;
+  hitTargets: WeakSet<object>;
 };
 
 export class GameEngine {
@@ -82,6 +98,7 @@ export class GameEngine {
   private readonly uiListeners = new Set<() => void>();
   private uiSnapshot: EngineUiSnapshot = {
     weaponSlots: [null, null],
+    weaponQualities: [null, null],
     activeWeaponIndex: 0,
     nearbyInteractables: [],
   };
@@ -114,12 +131,16 @@ export class GameEngine {
   }
 
   private weaponKey(id: WeaponId): TranslationKey {
-    if (id === 'default') return 'weapon.default';
-    if (id === 'bounce_gun') return 'weapon.bounce_gun';
-    if (id === 'knife') return 'weapon.knife';
-    if (id === 'bow') return 'weapon.bow';
-    const _exhaustive: never = id;
-    return _exhaustive;
+    switch (id) {
+      case 'default': return 'weapon.default';
+      case 'bounce_gun': return 'weapon.bounce_gun';
+      case 'knife': return 'weapon.knife';
+      case 'bow': return 'weapon.bow';
+      case 'pierce_gun': return 'weapon.pierce_gun';
+      case 'omni': return 'weapon.omni';
+      case 'em_generator': return 'weapon.em_generator';
+      case 'scatter_railgun': return 'weapon.scatter_railgun';
+    }
   }
 
   private getWeaponDisplayName(id: WeaponId): string {
@@ -149,6 +170,10 @@ export class GameEngine {
     return this.weaponSlots.map(w => w ? w.id : null);
   }
 
+  getWeaponSlotQualities(): Array<WeaponQuality | null> {
+    return this.weaponSlots.map(w => w ? w.quality : null);
+  }
+
   switchWeapon(index: 0 | 1) {
     if (index === this.activeWeaponIndex) return;
     if (!this.weaponSlots[index]) return;
@@ -157,7 +182,10 @@ export class GameEngine {
   }
 
   pickupWeapon(weaponId: WeaponId, nowMs: number) {
-    const newWeapon = createWeaponById(weaponId);
+    this.pickupWeaponInstance(createWeaponById(weaponId), nowMs);
+  }
+
+  pickupWeaponInstance(newWeapon: Weapon, nowMs: number) {
 
     const emptyIdx = this.weaponSlots.findIndex(w => !w);
     if (emptyIdx >= 0) {
@@ -171,7 +199,7 @@ export class GameEngine {
     if (prev) {
       const ox = this.player.x + (Math.random() - 0.5) * 40;
       const oy = this.player.y + (Math.random() - 0.5) * 40;
-      const drop = new WeaponDrop(ox, oy, nowMs, prev.id, this.getWeaponDisplayName(prev.id));
+      const drop = new WeaponDrop(ox, oy, nowMs, prev, this.getWeaponDisplayName(prev.id));
       this.weaponDrops.push(drop);
       this.interactables.add(drop);
     }
@@ -183,10 +211,25 @@ export class GameEngine {
   debugSpawnWeaponDrop(weaponId: WeaponId, nowMs: number = performance.now()) {
     const ox = this.player.x + (Math.random() - 0.5) * 40;
     const oy = this.player.y + (Math.random() - 0.5) * 40;
-    const drop = new WeaponDrop(ox, oy, nowMs, weaponId, this.getWeaponDisplayName(weaponId));
+    const weapon = createWeaponById(weaponId);
+    const drop = new WeaponDrop(ox, oy, nowMs, weapon, this.getWeaponDisplayName(weaponId));
     this.weaponDrops.push(drop);
     this.interactables.add(drop);
     this.refreshUiSnapshot();
+  }
+
+  private roundMp(value: number): number {
+    return Math.round(value * 10) / 10;
+  }
+
+  private canSpendMp(cost: number): boolean {
+    if (cost <= 0) return true;
+    return this.player.mp >= cost;
+  }
+
+  private spendMp(cost: number) {
+    if (cost <= 0) return;
+    this.player.mp = this.roundMp(Math.max(0, this.player.mp - cost));
   }
 
   interactWith(id: string) {
@@ -197,7 +240,7 @@ export class GameEngine {
 
     const now = performance.now();
     if (it.kind === 'WEAPON_DROP' && it instanceof WeaponDrop) {
-      this.pickupWeapon(it.weaponId, now);
+      this.pickupWeaponInstance(it.weapon, now);
       this.weaponDrops = this.weaponDrops.filter(w => w.id !== it.id);
       this.interactables.removeById(it.id);
       this.refreshUiSnapshot();
@@ -227,7 +270,9 @@ export class GameEngine {
   enemies: BaseEnemy[] = [];
   particles: Particle[] = [];
   slashArcs: SlashArcFx[] = [];
+  expandingRings: ExpandingRingFx[] = [];
   credits: Credit[] = [];
+  mpDrops: MpDrop[] = [];
   tiles: Tile[] = [];
 
   navigationPath: DungeonNavigationPath | null = null;
@@ -289,11 +334,18 @@ export class GameEngine {
     }
 
     if (content === 'WEAPON') {
-      const candidates: WeaponId[] = ['bounce_gun', 'bow'];
-      const weaponId = candidates[Math.floor(Math.random() * candidates.length)];
-      const drop = new WeaponDrop(cx, cy, nowMs, weaponId, this.getWeaponDisplayName(weaponId));
+      const worldIndex = this.dungeon.getWorldIndex();
+      const weaponId = this.rollWeaponRewardId(worldIndex);
+      const weapon = createWeaponById(weaponId);
+      const drop = new WeaponDrop(cx, cy, nowMs, weapon, this.getWeaponDisplayName(weaponId));
       this.weaponDrops.push(drop);
       this.interactables.add(drop);
+      this.dungeon.setRewardRoomClaimed(roomIndex);
+      return;
+    }
+
+    if (content === 'MP') {
+      this.mpDrops.push(new MpDrop(cx, cy, this.player.maxMp, nowMs));
       this.dungeon.setRewardRoomClaimed(roomIndex);
       return;
     }
@@ -306,6 +358,51 @@ export class GameEngine {
       this.credits.push(new Credit(cx + ox, cy + oy, 10, nowMs));
     }
     this.dungeon.setRewardRoomClaimed(roomIndex);
+  }
+
+  private getWeaponQualityWeights(worldIndex: number): Record<WeaponQuality, number> {
+    const base: Record<WeaponQuality, number> = { white: 40, green: 30, blue: 20, red: 10 };
+    const equal = 25;
+    const t = clamp(worldIndex / 50, 0, 1);
+
+    return {
+      white: base.white + (equal - base.white) * t,
+      green: base.green + (equal - base.green) * t,
+      blue: base.blue + (equal - base.blue) * t,
+      red: base.red + (equal - base.red) * t,
+    };
+  }
+
+  private rollWeaponRewardId(worldIndex: number): WeaponId {
+    const pool: Record<WeaponQuality, WeaponId[]> = {
+      white: ['bounce_gun', 'bow'],
+      green: ['pierce_gun', 'omni'],
+      blue: ['em_generator', 'scatter_railgun'],
+      red: [],
+    };
+
+    const weights = this.getWeaponQualityWeights(worldIndex);
+    const qualities: WeaponQuality[] = ['white', 'green', 'blue', 'red'];
+    const usable = qualities.filter((q) => pool[q].length > 0);
+
+    let total = 0;
+    for (const q of usable) total += weights[q];
+    if (total <= 0) {
+      return 'bounce_gun';
+    }
+
+    let r = Math.random() * total;
+    let chosen: WeaponQuality = usable[0];
+    for (const q of usable) {
+      r -= weights[q];
+      if (r <= 0) {
+        chosen = q;
+        break;
+      }
+    }
+
+    const ids = pool[chosen];
+    return ids[Math.floor(Math.random() * ids.length)];
   }
 
   private startCombatInRoom(roomIndex: number, nowMs: number) {
@@ -445,7 +542,9 @@ export class GameEngine {
     this.bulletManager.reset();
     this.particles = [];
     this.slashArcs = [];
+    this.expandingRings = [];
     this.credits = [];
+    this.mpDrops = [];
     this.tiles = [];
     this.healthPickups = [];
     this.portals = [];
@@ -503,9 +602,12 @@ export class GameEngine {
     const weapon = this.weaponSlots[this.activeWeaponIndex];
     if (!weapon || weapon.type !== 'melee') return;
 
+    const mpCost = weaponMpCostById[weapon.id];
+    if (!this.canSpendMp(mpCost)) return;
+
     const enemiesSnapshot = [...this.enemies];
 
-    weapon.tryAttack({
+    const attacked = weapon.tryAttack({
       timeMs,
       owner: this.player,
       enemies: enemiesSnapshot,
@@ -517,7 +619,18 @@ export class GameEngine {
           durationMs: 140,
         });
       },
+      spawnExpandingRing: (ring) => {
+        this.expandingRings.push({
+          ...ring,
+          startedAtMs: timeMs,
+          hitTargets: new WeakSet(),
+        });
+      },
     });
+
+    if (attacked) {
+      this.spendMp(mpCost);
+    }
   }
 
   startGame(difficulty?: Difficulty) {
@@ -670,14 +783,21 @@ export class GameEngine {
 
         const sameWeapon = this.rightChargeWeaponId === weapon.id && this.rightChargeWeaponIndex === this.activeWeaponIndex;
         if (sameWeapon) {
-          weapon.tryRelease({
-            timeMs: now,
-            owner: this.player,
-            aimDx: dx,
-            aimDy: dy,
-            chargeMs: Math.max(0, now - this.rightChargeStartedAtMs),
-            spawnBullet: (bullet) => this.spawnBullet(bullet),
-          });
+          const mpCost = weaponMpCostById[weapon.id];
+          if (this.canSpendMp(mpCost)) {
+            const released = weapon.tryRelease({
+              timeMs: now,
+              owner: this.player,
+              aimDx: dx,
+              aimDy: dy,
+              chargeMs: Math.max(0, now - this.rightChargeStartedAtMs),
+              spawnBullet: (bullet) => this.spawnBullet(bullet),
+            });
+
+            if (released) {
+              this.spendMp(mpCost);
+            }
+          }
         }
       }
 
@@ -760,13 +880,20 @@ export class GameEngine {
 
       const weapon = this.weaponSlots[this.activeWeaponIndex];
       if (weapon && weapon.type === 'projectile') {
-        weapon.tryFire({
-          timeMs: time,
-          owner: this.player,
-          aimDx: dx,
-          aimDy: dy,
-          spawnBullet: (bullet) => this.spawnBullet(bullet),
-        });
+        const mpCost = weaponMpCostById[weapon.id];
+        if (this.canSpendMp(mpCost)) {
+          const fired = weapon.tryFire({
+            timeMs: time,
+            owner: this.player,
+            aimDx: dx,
+            aimDy: dy,
+            spawnBullet: (bullet) => this.spawnBullet(bullet),
+          });
+
+          if (fired) {
+            this.spendMp(mpCost);
+          }
+        }
       }
     }
 
@@ -939,19 +1066,41 @@ export class GameEngine {
       }
     }
 
+    if (this.expandingRings.length > 0 && this.enemies.length > 0) {
+      for (const ring of this.expandingRings) {
+        const age = time - ring.startedAtMs;
+        if (age < 0 || age > ring.durationMs) continue;
+        const t = clamp(age / ring.durationMs, 0, 1);
+        const radius = ring.maxRadius * t;
+
+        for (const e of this.enemies) {
+          if (ring.hitTargets.has(e)) continue;
+          const dist = Math.hypot(e.x - ring.x, e.y - ring.y);
+          if (Math.abs(dist - radius) <= ring.thicknessPx + e.radius) {
+            ring.hitTargets.add(e);
+            this.applyDamageToEnemy(e, ring.damage, time);
+            const stunMs = ring.stunMinMs + Math.random() * (ring.stunMaxMs - ring.stunMinMs);
+            e.applyEffect('STUN', stunMs, time);
+          }
+        }
+      }
+    }
+
+    const creditMagnetRange = 220;
+    const creditPickupExtraRange = 25;
     for (let i = this.credits.length - 1; i >= 0; i--) {
       const c = this.credits[i];
       const dx = this.player.x - c.x;
       const dy = this.player.y - c.y;
       const dist = Math.hypot(dx, dy);
 
-      if (dist < 150) {
-        const pullSpeed = 400 * (1 - dist / 150);
+      if (dist < creditMagnetRange) {
+        const pullSpeed = 460 * (1 - dist / creditMagnetRange);
         c.x += (dx / dist) * pullSpeed * dt;
         c.y += (dy / dist) * pullSpeed * dt;
       }
 
-      if (dist < this.player.radius + 15) {
+      if (dist < this.player.radius + creditPickupExtraRange) {
         this.collectedCredits += c.value;
         this.onScoreChange?.(this.score, this.collectedCredits);
         this.credits.splice(i, 1);
@@ -964,6 +1113,38 @@ export class GameEngine {
             0,
             200,
             '#06b6d4'
+          ));
+        }
+      }
+    }
+
+    const mpMagnetRange = 240;
+    const mpPickupExtraRange = 30;
+    for (let i = this.mpDrops.length - 1; i >= 0; i--) {
+      const m = this.mpDrops[i];
+      const dx = this.player.x - m.x;
+      const dy = this.player.y - m.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < mpMagnetRange) {
+        const pullSpeed = 520 * (1 - dist / mpMagnetRange);
+        m.x += (dx / dist) * pullSpeed * dt;
+        m.y += (dy / dist) * pullSpeed * dt;
+      }
+
+      if (dist < this.player.radius + mpPickupExtraRange) {
+        const next = this.roundMp(this.player.mp + m.value);
+        this.player.mp = Math.min(this.player.maxMp, Math.max(0, next));
+        this.mpDrops.splice(i, 1);
+        for (let k = 0; k < 4; k++) {
+          this.particles.push(new Particle(
+            m.x,
+            m.y,
+            (Math.random() - 0.5) * 240,
+            (Math.random() - 0.5) * 240,
+            0,
+            240,
+            '#ffffff'
           ));
         }
       }
@@ -1008,6 +1189,13 @@ export class GameEngine {
       const a = this.slashArcs[i];
       if (time - a.startedAtMs >= a.durationMs) {
         this.slashArcs.splice(i, 1);
+      }
+    }
+
+    for (let i = this.expandingRings.length - 1; i >= 0; i--) {
+      const r = this.expandingRings[i];
+      if (time - r.startedAtMs >= r.durationMs) {
+        this.expandingRings.splice(i, 1);
       }
     }
 
@@ -1078,6 +1266,7 @@ export class GameEngine {
     this.bulletManager.reset();
     this.particles = [];
     this.credits = [];
+    this.mpDrops = [];
     this.healthPickups = [];
     this.portals = [];
     this.weaponDrops = [];
@@ -1230,6 +1419,10 @@ export class GameEngine {
       this.credits.push(new Credit(enemy.x, enemy.y, 10, timeMs));
     }
 
+    if (Math.random() < 0.5) {
+      this.mpDrops.push(new MpDrop(enemy.x, enemy.y, enemy.maxHp * 0.1, timeMs));
+    }
+
     for (let k = 0; k < 8; k++) {
       this.particles.push(new Particle(
         enemy.x,
@@ -1313,9 +1506,9 @@ export class GameEngine {
   }
 
   private refreshUiSnapshot() {
-    const weaponSig = `${this.activeWeaponIndex}:${this.weaponSlots.map(w => w ? w.id : '_').join(',')}`;
+    const weaponSig = `${this.activeWeaponIndex}:${this.weaponSlots.map(w => w ? `${w.id}:${w.quality}` : '_').join(',')}`;
     const nearby = this.nearbyInteractables;
-    const interactablesSig = `${this.language}:${nearby.map((e) => `${e.id}:${e.title}`).join('|')}`;
+    const interactablesSig = `${this.language}:${nearby.map((e) => `${e.id}:${e.title}:${e.quality ?? '_'}`).join('|')}`;
 
     if (weaponSig === this.uiWeaponSig && interactablesSig === this.uiInteractablesSig) {
       return;
@@ -1326,6 +1519,7 @@ export class GameEngine {
 
     this.uiSnapshot = {
       weaponSlots: this.getWeaponSlots(),
+      weaponQualities: this.getWeaponSlotQualities(),
       activeWeaponIndex: this.activeWeaponIndex,
       nearbyInteractables: nearby,
     };

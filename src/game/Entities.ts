@@ -2,6 +2,7 @@ export { Tile } from './entities/Tile';
 export type { TileKind } from './entities/Tile';
 
 export { Credit } from './entities/Credit';
+export { MpDrop } from './entities/MpDrop';
 export { HealthPickup } from './entities/HealthPickup';
 export { Portal } from './entities/Portal';
 export { Interactable } from './entities/interactables/Interactable';

@@ -47,10 +47,12 @@ export class Renderer {
     engine.healthPickups.forEach(h => h.draw(ctx, cameraX, cameraY, t));
     engine.weaponDrops.forEach(w => w.draw(ctx, cameraX, cameraY, t));
     engine.credits.forEach(c => c.draw(ctx, cameraX, cameraY, t));
+    engine.mpDrops.forEach(m => m.draw(ctx, cameraX, cameraY, t));
     engine.particles.forEach(p => p.draw(ctx, cameraX, cameraY));
     engine.enemies.forEach(e => e.draw(ctx, cameraX, cameraY, engine.language ?? 'en'));
 
     this.drawSlashArcs(engine, cameraX, cameraY, nowMs);
+    this.drawExpandingRings(engine, cameraX, cameraY, nowMs);
 
     for (const projectile of engine.projectiles) {
       if (!projectile.isPlayer) {
@@ -167,6 +169,47 @@ export class Renderer {
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(x, y, a.radius, start, end);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  private drawExpandingRings(engine: GameEngine, cameraX: number, cameraY: number, nowMs: number) {
+    const { ctx } = this;
+    if (!engine.expandingRings || engine.expandingRings.length === 0) return;
+
+    for (const r of engine.expandingRings) {
+      const age = nowMs - r.startedAtMs;
+      if (age < 0 || age > r.durationMs) continue;
+
+      const t = Math.max(0, Math.min(1, age / r.durationMs));
+      const alpha = (1 - t) * (1 - t);
+      const radius = r.maxRadius * t;
+
+      const x = r.x - cameraX;
+      const y = r.y - cameraY;
+
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+
+      ctx.shadowColor = r.color;
+      ctx.shadowBlur = 18 * alpha;
+      ctx.globalAlpha = 0.65 * alpha;
+
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 0.9 * alpha;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.restore();
@@ -434,18 +477,22 @@ export class Renderer {
     const player = engine.player;
     const language = engine.language ?? 'en';
 
+    const barWidth = 300;
+    const barHeight = 9;
+    const barX = canvas.width / 2 - barWidth / 2;
+    const barGapY = 22;
+    const hpBarY = canvas.height - 50;
+    const mpBarY = hpBarY - barGapY;
+    const shieldBarY = mpBarY - barGapY;
+
     if (player.maxShield > 0) {
-      const barWidth = 300;
-      const barHeight = 10;
-      const barX = canvas.width / 2 - barWidth / 2;
-      const hpBarY = canvas.height - 50;
-      const barY = hpBarY - 22;
+      const barY = shieldBarY;
 
       const shieldPercent = Math.max(0, Math.min(1, player.shield / player.maxShield));
-      const isLowShield = shieldPercent < 0.25;
+      const shieldColor = '#9ca3af';
 
       ctx.save();
-      ctx.strokeStyle = isLowShield ? '#eab308' : '#06b6d4';
+      ctx.strokeStyle = shieldColor;
       ctx.lineWidth = 2;
       ctx.shadowColor = ctx.strokeStyle;
       ctx.shadowBlur = 8;
@@ -466,7 +513,7 @@ export class Renderer {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(barX, barY, barWidth, barHeight);
 
-      ctx.fillStyle = isLowShield ? '#eab308' : '#06b6d4';
+      ctx.fillStyle = shieldColor;
       ctx.shadowColor = ctx.fillStyle;
       ctx.shadowBlur = 10;
       ctx.fillRect(barX, barY, barWidth * shieldPercent, barHeight);
@@ -485,15 +532,60 @@ export class Renderer {
       ctx.fillText(translate(language, 'hud.auxShield'), barX, barY - 6);
 
       ctx.textAlign = 'right';
-      ctx.fillStyle = isLowShield ? '#eab308' : '#06b6d4';
+      ctx.fillStyle = shieldColor;
       ctx.fillText(`${Math.ceil(Math.max(0, player.shield))} / ${player.maxShield}`, barX + barWidth, barY - 6);
       ctx.restore();
     }
 
-    const hpBarWidth = 300;
-    const hpBarHeight = 14;
-    const hpBarX = canvas.width / 2 - hpBarWidth / 2;
-    const hpBarY = canvas.height - 50;
+    const mpPercent = player.maxMp > 0 ? Math.max(0, Math.min(1, player.mp / player.maxMp)) : 0;
+    const isLowMp = mpPercent < 0.15;
+    const mpColor = isLowMp ? '#60a5fa' : '#3b82f6';
+
+    ctx.save();
+    ctx.strokeStyle = mpColor;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = ctx.strokeStyle;
+    ctx.shadowBlur = 8;
+
+    ctx.beginPath();
+    ctx.moveTo(barX - 10, mpBarY - 4);
+    ctx.lineTo(barX - 10, mpBarY + barHeight + 4);
+    ctx.lineTo(barX - 2, mpBarY + barHeight + 4);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(barX + barWidth + 10, mpBarY - 4);
+    ctx.lineTo(barX + barWidth + 10, mpBarY + barHeight + 4);
+    ctx.lineTo(barX + barWidth + 2, mpBarY + barHeight + 4);
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(barX, mpBarY, barWidth, barHeight);
+
+    ctx.fillStyle = mpColor;
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 10;
+    ctx.fillRect(barX, mpBarY, barWidth * mpPercent, barHeight);
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    const mpSegments = 12;
+    for (let i = 1; i < mpSegments; i++) {
+      ctx.fillRect(barX + (barWidth / mpSegments) * i - 1, mpBarY, 2, barHeight);
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px "JetBrains Mono", monospace, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(translate(language, 'hud.mp'), barX, mpBarY - 6);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = mpColor;
+    ctx.fillText(`${Math.max(0, player.mp).toFixed(1)} / ${player.maxMp}`, barX + barWidth, mpBarY - 6);
+    ctx.restore();
+
     const hpPercent = Math.max(0, player.hp / player.maxHp);
     const isLowHp = hpPercent < 0.3;
 
@@ -504,42 +596,42 @@ export class Renderer {
     ctx.shadowBlur = 8;
 
     ctx.beginPath();
-    ctx.moveTo(hpBarX - 10, hpBarY - 4);
-    ctx.lineTo(hpBarX - 10, hpBarY + hpBarHeight + 4);
-    ctx.lineTo(hpBarX - 2, hpBarY + hpBarHeight + 4);
+    ctx.moveTo(barX - 10, hpBarY - 4);
+    ctx.lineTo(barX - 10, hpBarY + barHeight + 4);
+    ctx.lineTo(barX - 2, hpBarY + barHeight + 4);
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.moveTo(hpBarX + hpBarWidth + 10, hpBarY - 4);
-    ctx.lineTo(hpBarX + hpBarWidth + 10, hpBarY + hpBarHeight + 4);
-    ctx.lineTo(hpBarX + hpBarWidth + 2, hpBarY + hpBarHeight + 4);
+    ctx.moveTo(barX + barWidth + 10, hpBarY - 4);
+    ctx.lineTo(barX + barWidth + 10, hpBarY + barHeight + 4);
+    ctx.lineTo(barX + barWidth + 2, hpBarY + barHeight + 4);
     ctx.stroke();
 
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+    ctx.fillRect(barX, hpBarY, barWidth, barHeight);
 
     ctx.fillStyle = isLowHp ? '#ef4444' : '#22c55e';
     ctx.shadowColor = ctx.fillStyle;
     ctx.shadowBlur = 10;
-    ctx.fillRect(hpBarX, hpBarY, hpBarWidth * hpPercent, hpBarHeight);
+    ctx.fillRect(barX, hpBarY, barWidth * hpPercent, barHeight);
 
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    const segments = 10;
-    for (let i = 1; i < segments; i++) {
-      ctx.fillRect(hpBarX + (hpBarWidth / segments) * i - 1, hpBarY, 2, hpBarHeight);
+    const hpSegments = 12;
+    for (let i = 1; i < hpSegments; i++) {
+      ctx.fillRect(barX + (barWidth / hpSegments) * i - 1, hpBarY, 2, barHeight);
     }
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 12px "JetBrains Mono", monospace, sans-serif';
+    ctx.font = 'bold 11px "JetBrains Mono", monospace, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(translate(language, 'hud.sysIntegrity'), hpBarX, hpBarY - 6);
+    ctx.fillText(translate(language, 'hud.sysIntegrity'), barX, hpBarY - 6);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = isLowHp ? '#ef4444' : '#06b6d4';
-    ctx.fillText(`${Math.ceil(Math.max(0, player.hp))} / ${player.maxHp}`, hpBarX + hpBarWidth, hpBarY - 6);
+    ctx.fillText(`${Math.ceil(Math.max(0, player.hp))} / ${player.maxHp}`, barX + barWidth, hpBarY - 6);
     ctx.restore();
 
     ctx.textAlign = 'left';

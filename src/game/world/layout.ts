@@ -129,7 +129,7 @@ export function createDungeonLayout(worldIndex: number, sizing: WorldSizing): Wo
   for (const n of nodes) {
     if (n.kind === 'REWARD') {
       const r = rng();
-      n.rewardContent = r < 1 / 3 ? 'CREDIT' : r < 2 / 3 ? 'HEAL' : 'WEAPON';
+      n.rewardContent = r < 1 / 4 ? 'CREDIT' : r < 2 / 4 ? 'HEAL' : r < 3 / 4 ? 'MP' : 'WEAPON';
     }
     if (n.kind === 'COMBAT') {
       const bonus = rng() < 0.25 ? 1 : 0;

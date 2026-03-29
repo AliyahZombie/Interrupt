@@ -1,3 +1,5 @@
+import type { WeaponQuality } from '../../combat/Weapon';
+
 export type InteractableKind = 'PORTAL' | 'HEALTH_PICKUP' | 'WEAPON_DROP';
 
 export type InteractableMode = 'AUTO' | 'MANUAL';
@@ -7,6 +9,7 @@ export interface NearbyInteractableEntry {
   kind: InteractableKind;
   title: string;
   distance: number;
+  quality?: WeaponQuality;
 }
 
 let interactableSeq = 0;

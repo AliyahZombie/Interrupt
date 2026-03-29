@@ -49,12 +49,15 @@ export class BulletManager {
       if (b.isPlayer) {
         for (let j = enemies.length - 1; j >= 0; j--) {
           const e = enemies[j];
+          if (b.hitTargets.has(e)) {
+            continue;
+          }
           if (Math.hypot(b.x - e.x, b.y - e.y) < e.radius + b.radius) {
+            b.hitTargets.add(e);
             e.hp -= b.damage;
             if (b.effectKind && b.effectDurationMs && b.effectDurationMs > 0) {
               e.applyEffect(b.effectKind, b.effectDurationMs, timeMs);
             }
-            hit = true;
             for (let k = 0; k < 5; k++) {
               particles.push(new Particle(
                 b.x,
@@ -73,7 +76,18 @@ export class BulletManager {
                 credits.push(new Credit(e.x, e.y, 10, timeMs));
               }
             }
-            break;
+
+            if (b.piercesRemaining === 0) {
+              hit = true;
+              break;
+            }
+            if (b.piercesRemaining > 0) {
+              b.piercesRemaining -= 1;
+              if (b.piercesRemaining === 0) {
+                hit = true;
+                break;
+              }
+            }
           }
         }
       } else {
